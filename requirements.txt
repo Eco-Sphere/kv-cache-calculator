@@ -1,0 +1,2 @@
+# kv_cache_size.py：--model 为 ModelScope model_id 时拉取 config.json
+modelscope>=1.9.0

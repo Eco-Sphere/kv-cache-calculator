@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "description": "estimate_kv_cache_bytes 的预期结果；测试运行时从 ModelScope 拉取对应模型的 config.json。若上游 config 变更导致失败，请对照 hub 更新本文件中的 expect。",
+  "cases": [
+    {
+      "id": "ZhipuAI_GLM-5.1_mla_bf16_indexer_bf16_N128",
+      "model_id": "ZhipuAI/GLM-5.1",
+      "num_tokens": 128,
+      "batch": 1,
+      "dtype": null,
+      "indexer_layout": "bf16",
+      "expect": {
+        "mode": "glm_mla",
+        "model_type": "glm_moe_dsa",
+        "architectures": ["GlmMoeDsaForCausalLM"],
+        "layers": 78,
+        "kv_lora_rank": 512,
+        "qk_rope_head_dim": 64,
+        "dtype": "bfloat16",
+        "bytes_per_elem": 2,
+        "mla_per_token_bytes": 89856,
+        "indexer_per_token_bytes": 19968,
+        "per_token_bytes": 109824,
+        "total_bytes": 14057472
+      }
+    },
+    {
+      "id": "ZhipuAI_GLM-5.1_mla_fp8_indexer_bf16_N8192",
+      "model_id": "ZhipuAI/GLM-5.1",
+      "num_tokens": 8192,
+      "batch": 1,
+      "dtype": "fp8",
+      "indexer_layout": "bf16",
+      "expect": {
+        "mode": "glm_mla",
+        "dtype": "fp8",
+        "bytes_per_elem": 1,
+        "mla_per_token_bytes": 44928,
+        "indexer_per_token_bytes": 19968,
+        "per_token_bytes": 64896,
+        "total_bytes": 531628032
+      }
+    },
+    {
+      "id": "MiniMax_MiniMax-M2.7_standard_bf16_N128",
+      "model_id": "MiniMax/MiniMax-M2.7",
+      "num_tokens": 128,
+      "batch": 1,
+      "dtype": null,
+      "indexer_layout": "bf16",
+      "expect": {
+        "mode": "standard",
+        "layers": 62,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "dtype": "bfloat16",
+        "bytes_per_elem": 2,
+        "per_token_bytes": 253952,
+        "total_bytes": 32505856
+      }
+    }
+  ]
+}

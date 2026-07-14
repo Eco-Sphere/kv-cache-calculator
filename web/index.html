@@ -19,7 +19,7 @@
           <label><span>Sequences</span><input id="sequences" type="number" min="1" step="1" value="1"></label>
           <label><span>TP size</span><select id="tensor-parallel"></select></label>
           <label><span>KV precision</span><select id="precision"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option><option value="0.5">FP4 / INT4</option></select></label>
-          <label id="indexer-control" hidden><span>Indexer precision</span><select id="indexer"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option><option value="0.5">FP4 / INT4</option></select></label>
+          <label id="indexer-control" hidden><span>Indexer precision</span><select id="indexer"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option></select></label>
           <label class="checkbox-row" id="draft-control" hidden><input id="draft" type="checkbox"><span title="Adds model-specific MTP/draft KV layers when enabled by the serving stack.">Include draft KV cache</span></label>
           <label class="checkbox-row" id="linear-control" hidden><input id="linear" type="checkbox"><span>Include linear-attention state</span></label>
           <div class="cta-note">

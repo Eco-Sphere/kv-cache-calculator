@@ -1,5 +1,15 @@
 # KV Cache Calculator
 
+## 网页计算器
+
+直接用浏览器打开 `web/index.html`，或在仓库目录启动静态服务器：
+
+```bash
+python3 -m http.server 8000 --directory web
+```
+
+然后访问 `http://localhost:8000`。当前网页专用于 MiniMax M3，分别估算主 KV cache 与 MSA Indexer cache。
+
 根据 HuggingFace 风格的 `config.json` **估算 decoder KV cache 占用字节数**，用于容量规划或和实测对照。支持两类结构，由配置自动分流。
 
 ## 安装
@@ -65,15 +75,20 @@ spec.print_report(model_source="...", num_tokens=8192, batch=1, indexer_layout="
 ## 仓库布局
 
 ```
-kv_cache_size.py         # CLI + GlmMLA / NormalAttention + estimate_kv_cache_bytes 等
-requirements.txt         # 运行 CLI（ModelScope）
-requirements-dev.txt     # + pytest
-requirements-excel.txt   # 可选：build_kv_cache_excel.py
+web/                     # 零依赖静态网页
+  index.html             # 页面结构
+  assets/
+    styles.css           # 页面样式
+    script.js            # MiniMax M3 计算和交互
+kv_cache_size.py         # Python CLI 与计算 API
 tests/
   test_kv_cache_size.py
   kv_cache_expected.json
-pytest.ini
-README.md
+requirements.txt         # CLI 运行依赖
+requirements-dev.txt     # 测试依赖
+requirements-excel.txt   # 可选 Excel 依赖
+pytest.ini               # pytest 配置
+README.md                 # 项目说明
 ```
 
 其他脚本（如 `build_kv_cache_excel.py`）若存在，与核心估算逻辑无强绑定，以各自脚本说明为准。

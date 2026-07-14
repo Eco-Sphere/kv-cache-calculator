@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="KV Cache Size Calculator">
+  <title>KV Cache Size Calculator</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <main class="page">
+    <h1>KV Cache Size Calculator</h1>
+    <section class="calculator">
+      <div class="calculator-grid">
+        <form class="controls" id="cache-form" onsubmit="return false">
+          <label><span>Model family</span><select id="family"></select></label>
+          <label><span>Model</span><select id="model"></select></label>
+          <label><span>Tokens per sequence</span><input id="tokens" type="number" min="1" step="1" value="1024"></label>
+          <label><span>Sequences</span><input id="sequences" type="number" min="1" step="1" value="1"></label>
+          <label><span>KV precision</span><select id="precision"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option><option value="0.5">FP4 / INT4</option></select></label>
+          <label id="indexer-control" hidden><span>Indexer precision</span><select id="indexer"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option><option value="0.5">FP4 / INT4</option></select></label>
+          <label class="checkbox-row" id="draft-control" hidden><input id="draft" type="checkbox"><span title="Adds model-specific MTP/draft KV layers when enabled by the serving stack.">Include draft KV cache</span></label>
+          <label class="checkbox-row" id="linear-control" hidden><input id="linear" type="checkbox"><span>Include linear-attention state</span></label>
+          <div class="cta-note">
+            <p>Want to analyze KV cache hit rates of your traces? Try our <a href="#">KV Cache Hit Rate Simulator</a>.</p>
+            <p>Want to scale KV cache storage across your inference cluster? Try <a href="#">Mooncake</a>.</p>
+            <p>Found an issue or have feedback? <a href="#">Open an issue</a> and let us know.</p>
+          </div>
+        </form>
+
+        <div class="results" aria-live="polite">
+          <div class="total-band">
+            <div><span>Total cache size</span><strong id="total-gib">--</strong></div>
+            <em id="total-gb">= -- GB</em>
+          </div>
+          <div class="metric-grid">
+            <div><span id="metric-one-label">Per sequence</span><strong id="metric-one">--</strong></div>
+            <div><span id="metric-two-label">Per token</span><strong id="metric-two">--</strong></div>
+            <div><span id="metric-three-label">Bytes per element</span><strong id="metric-three">--</strong></div>
+          </div>
+          <div class="formula-panel">
+            <div class="formula-heading" id="formula-label">--</div>
+            <div class="formula-list" id="formula-list"></div>
+            <p id="cache-note">--</p>
+          </div>
+          <div class="breakdown" id="breakdown"></div>
+          <a class="source-link" id="source-link" href="#" target="_blank" rel="noopener">Source: <span id="source">--</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="assets/script.js"></script>
+</body>
+</html>

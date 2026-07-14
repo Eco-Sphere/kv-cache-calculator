@@ -2,6 +2,8 @@
 
 ## 网页计算器
 
+在线访问：[https://eco-sphere.github.io/kv-cache-calculator/](https://eco-sphere.github.io/kv-cache-calculator/)
+
 直接用浏览器打开 `web/index.html`，或在仓库目录启动静态服务器：
 
 ```bash

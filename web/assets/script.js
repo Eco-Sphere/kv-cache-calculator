@@ -27,6 +27,16 @@
 
   const BYTES_PER_GB = 1e9;
   const BYTES_PER_GIB = 1024 ** 3;
+  const PRECISION_ALIASES = {
+    "2": "bf16_fp16",
+    "1": "fp8_int8",
+    "0.5": "fp4_int4"
+  };
+
+  function normalizePrecision(value, fallback) {
+    const raw = String(value || fallback);
+    return PRECISION_ALIASES[raw] || raw;
+  }
 
   function numericField(model, name, fallback) {
     const value = Number(model && model.fields && model.fields[name]);
@@ -129,8 +139,11 @@
       {
         tokens: input.tokens,
         sequences: input.sequences,
-        precision: input.precision || defaultPrecision(model),
-        indexerPrecision: input.indexerPrecision || defaultIndexerPrecision(model),
+        precision: normalizePrecision(input.precision, defaultPrecision(model)),
+        indexerPrecision: normalizePrecision(
+          input.indexerPrecision,
+          defaultIndexerPrecision(model)
+        ),
         includeDraftKvCache: Boolean(input.includeDraftKvCache),
         includeLinearAttentionState: Boolean(input.includeLinearAttentionState),
         tensorParallel: 1

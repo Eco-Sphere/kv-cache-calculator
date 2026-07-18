@@ -108,3 +108,14 @@ test("invalid TP size is rejected", () => {
     /num_key_value_heads \/ TP must be an integer/,
   );
 });
+
+test("legacy numeric precision values do not produce NaN", () => {
+  const item = model("minimax-m3");
+  const result = app.calculateView(item, inputFor(item, {
+    precision: "2",
+    indexerPrecision: "1",
+  }), data);
+  assert.equal(result.precisionLabel, "BF16 / FP16");
+  assert.equal(result.indexerPrecisionLabel, "FP8 / INT8");
+  assert.ok(Number.isFinite(result.perDeviceBytes));
+});

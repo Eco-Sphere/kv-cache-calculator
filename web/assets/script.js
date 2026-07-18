@@ -1,216 +1,582 @@
-const MODELS = [
-  {
-    family: "MiniMax", id: "minimax-m3", label: "MiniMax M3", type: "minimax_msa",
-    layers: 60, fullLayers: 3, sparseLayers: 57, heads: 4, dim: 128,
-    indexDim: 128, indexQHeads: 4, indexKHeads: 1, indexBlockSize: 128,
-    indexTopkBlocks: 16, indexLocalBlocks: 1, mtpModules: 7, nextNLayers: 1,
-    max: 1048576, source: "MiniMaxAI/MiniMax-M3"
-  },
-  {
-    family: "Qwen3.6", id: "qwen3.6-27b", label: "Qwen3.6-27B", type: "qwen_linear_full_hybrid",
-    layers: 64, fullLayers: 16, linearLayers: 48, heads: 4, dim: 256,
-    linearKeyHeads: 16, linearKeyDim: 128, linearValueHeads: 48,
-    linearValueDim: 128, linearConvKernel: 4, mtpLayers: 1,
-    max: 262144, source: "Qwen/Qwen3.6-27B"
-  }
-];
-
-const $ = (id) => document.getElementById(id);
-const families = [...new Set(MODELS.map((model) => model.family))];
-families.forEach((family) => $("family").add(new Option(family, family)));
-
-function modelsForFamily() {
-  return MODELS.filter((model) => model.family === $("family").value);
-}
-
-function fillModels() {
-  const previous = $("model").value;
-  $("model").replaceChildren();
-  modelsForFamily().forEach((model) => $("model").add(new Option(model.label, model.id)));
-  if (modelsForFamily().some((model) => model.id === previous)) $("model").value = previous;
-  syncModel();
-}
-
-function selected() {
-  return MODELS.find((model) => model.id === $("model").value) || modelsForFamily()[0];
-}
-
-function formatBytes(bytes) {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(value >= 100 ? 1 : value >= 10 ? 2 : 3)} ${units[unit]}`;
-}
-
-function syncTpOptions(model) {
-  const select = $("tensor-parallel");
-  const previous = Number(select.value);
-  const options = Array.from({ length: model.heads }, (_, index) => index + 1)
-    .filter((tp) => model.heads % tp === 0);
-  select.replaceChildren(...options.map((tp) => new Option(String(tp), String(tp))));
-  select.value = options.includes(previous) ? String(previous) : String(options[0]);
-}
-
-function syncModel() {
-  const model = selected();
-  $("tokens").value = Math.min(1024, model.max);
-  syncTpOptions(model);
-  $("indexer-control").hidden = model.type !== "minimax_msa";
-  $("indexer").disabled = false;
-  $("linear-control").hidden = model.type !== "qwen_linear_full_hybrid";
-  $("linear").checked = model.type === "qwen_linear_full_hybrid";
-  $("draft-control").hidden = true;
-  $("draft").checked = false;
-  calculate();
-}
-
-function renderFormula(rows) {
-  $("formula-list").replaceChildren(...rows.map(([name, expression]) => {
-    const row = document.createElement("div");
-    row.className = "formula-row";
-    row.innerHTML = `<span class="formula-name">${name}</span><span class="formula-equals">=</span><span class="formula-expression">${expression}</span>`;
-    return row;
-  }));
-}
-
-function renderBreakdown(rows) {
-  $("breakdown").replaceChildren(...rows.map(([name, value, help]) => {
-    const row = document.createElement("div");
-    row.className = "breakdown-row";
-    const label = document.createElement("span");
-    label.textContent = name;
-    if (help) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "kv-help";
-      button.textContent = "?";
-      button.setAttribute("aria-label", help);
-      button.dataset.tooltip = help;
-      label.append(button);
-    }
-    const strong = document.createElement("strong");
-    strong.textContent = typeof value === "number" ? value.toLocaleString() : value;
-    row.append(label, strong);
-    return row;
-  }));
-}
-
-function calculateMiniMax(model, tokens, sequences, tp, precision) {
-  const indexerPrecision = Number($("indexer").value);
-  const kvElementsPerToken = model.layers * 2 * model.heads * model.dim;
-  const indexerElementsPerToken = model.sparseLayers * model.indexDim;
-  const kvTotal = tokens * sequences * kvElementsPerToken * precision;
-  const indexerTotal = tokens * sequences * indexerElementsPerToken * indexerPrecision;
-  const perDevice = kvTotal / tp + indexerTotal;
-  const total = perDevice * tp;
-  return {
-    kvTotal, sideTotal: indexerTotal, total,
-    perDevice,
-    label: "MiniMax MSA sparse attention",
-    rows: [
-      ["kv_bytes", "tokens × sequences × layers × 2 × num_key_value_heads × head_dim × kv_precision_bytes"],
-      ["indexer_bytes", "tokens × sequences × sparse_attention_layers × index_head_dim × indexer_precision_bytes"],
-      ["per_device_bytes", "kv_bytes / TP size + indexer_bytes"],
-      ["all_device_bytes", "kv_bytes + TP size × indexer_bytes"]
-    ],
-    note: "MiniMax Sparse Attention (MSA) uses a lightweight indexer to select relevant KV blocks, with a separate key-only indexer cache for block selection.",
-    metrics: [["Per-device KV cache", kvTotal / tp], ["Per-device Indexer cache", indexerTotal]],
-    perTokenLabel: "Per-device per token size",
-    perTokenValue: (kvTotal / tp + indexerTotal) / (tokens * sequences),
-    breakdown: [
-      ["Main layers", model.layers],
-      ["Full-attention layers", model.fullLayers, "Dense/full-attention layers without the MSA indexer branch."],
-      ["Sparse-attention layers", model.sparseLayers, "MSA layers that add a key-only indexer side cache."],
-      ["Per-device KV elements per token", kvElementsPerToken / tp, "Main K/V elements per token on each TP rank before applying KV precision."],
-      ["Per-device Indexer elements per token", indexerElementsPerToken, "The complete MSA index-key cache is stored on every TP rank."],
-      ["Index Q heads", model.indexQHeads, "Indexer query heads used for scoring selected KV blocks."],
-      ["Index K heads", model.indexKHeads, "The Indexer stores one key head, replicated across tensor-parallel ranks."],
-      ["Index block size", model.indexBlockSize], ["Top-k blocks", model.indexTopkBlocks],
-      ["Local blocks", model.indexLocalBlocks], ["MTP modules not included", model.mtpModules],
-      ["Next-N layers not included", model.nextNLayers],
-      ["KV precision bytes", precision], ["Indexer precision bytes", indexerPrecision]
-    ]
-  };
-}
-
-function calculateQwen(model, tokens, sequences, tp, precision) {
-  const includeLinear = $("linear").checked;
-  const kvElementsPerToken = model.fullLayers * 2 * model.heads * model.dim;
-  const kvTotal = tokens * sequences * kvElementsPerToken * precision;
-  const convElementsPerSequence = model.linearLayers * model.linearConvKernel
-    * (2 * model.linearKeyHeads * model.linearKeyDim + model.linearValueHeads * model.linearValueDim);
-  const recurrentElementsPerSequence = model.linearLayers * model.linearValueHeads
-    * model.linearKeyDim * model.linearValueDim;
-  const convStateTotal = includeLinear ? sequences * convElementsPerSequence * 2 : 0;
-  const recurrentStateTotal = includeLinear ? sequences * recurrentElementsPerSequence * 4 : 0;
-  const linearStateTotal = convStateTotal + recurrentStateTotal;
-  const total = kvTotal + linearStateTotal;
-  const rows = [
-    ["full_kv_bytes", "tokens × sequences × full_attention_layers × 2 × num_key_value_heads × head_dim × precision_bytes"]
-  ];
-  if (includeLinear) {
-    rows.push(
-      ["linear_conv_state_bytes", "sequences × linear_attention_layers × kernel_dim × (2 × key_heads × key_dim + value_heads × value_dim) × 2"],
-      ["linear_recurrent_state_bytes", "sequences × linear_attention_layers × value_heads × key_dim × value_dim × 4"],
-      ["total_bytes", "full_kv_bytes + linear_conv_state_bytes + linear_recurrent_state_bytes"]
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory(
+      require("./calculator-core.js"),
+      require("./models.js"),
+      null
     );
-  } else {
-    rows.push(["linear_attention_state", "excluded unless Include linear-attention state is enabled"], ["total_bytes", "full_kv_bytes"]);
+    return;
   }
-  return {
-    kvTotal, sideTotal: linearStateTotal, total, perDevice: total / tp,
-    label: "Qwen linear/full hybrid",
-    rows,
-    note: includeLinear
-      ? "Qwen3.6 linear-attention state is fixed per sequence rather than per token, so it matters more for short prompts."
-      : "Qwen3.6 linear-attention recurrent and convolution state is excluded by default. Enable the option to add the fixed runtime-state estimate.",
-    metrics: [["Per-device Full-attention KV", kvTotal / tp], ["Per-device Linear-attention state", linearStateTotal / tp]],
-    perTokenLabel: "Per-device per token size",
-    perTokenValue: total / (tokens * sequences * tp),
-    breakdown: [
-      ["Main layers", model.layers], ["Full-attention layers", model.fullLayers],
-      ["Linear-attention layers", model.linearLayers], ["Linear state included", includeLinear ? "Yes" : "No"],
-      ["Per-device linear conv elements", convElementsPerSequence / tp],
-      ["Per-device linear recurrent elements", recurrentElementsPerSequence / tp],
-      ["MTP layers not included", model.mtpLayers], ["Per-device KV elements per token", kvElementsPerToken / tp],
-      ["KV precision bytes", precision]
-    ]
+
+  const app = factory(root.KVCacheCalculator, root.KV_MODEL_DATA, root.document);
+  root.KVCacheCalculatorApp = app;
+  const start = function () {
+    app.mount(root.document, root.KV_MODEL_DATA);
   };
-}
+  if (root.document.readyState === "loading") {
+    root.document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this, function (Core, MODEL_DATA, document) {
+  "use strict";
 
-function calculate() {
-  const model = selected();
-  const tokens = Math.max(1, Number($("tokens").value) || 1);
-  const sequences = Math.max(1, Number($("sequences").value) || 1);
-  const tp = Math.max(1, Number($("tensor-parallel").value) || 1);
-  const precision = Number($("precision").value);
-  const result = model.type === "minimax_msa"
-    ? calculateMiniMax(model, tokens, sequences, tp, precision)
-    : calculateQwen(model, tokens, sequences, tp, precision);
+  if (!Core || !MODEL_DATA || !Array.isArray(MODEL_DATA.models)) {
+    throw new Error("KV cache calculator data failed to load.");
+  }
 
-  $("per-device-gib").textContent = `${(result.perDevice / 1024 ** 3).toFixed(5)} GiB`;
-  $("per-device-gb").textContent = `= ${(result.perDevice / 1e9).toFixed(5)} GB`;
-  $("total-cache-metric").textContent = formatBytes(result.total);
-  $("metric-one-label").textContent = result.metrics[0][0];
-  $("metric-one").textContent = formatBytes(result.metrics[0][1]);
-  $("metric-two-label").textContent = result.metrics[1][0];
-  $("metric-two").textContent = formatBytes(result.metrics[1][1]);
-  $("metric-three-label").textContent = result.perTokenLabel || "Per token size";
-  $("metric-three").textContent = formatBytes(result.perTokenValue || result.total / (tokens * sequences));
-  $("formula-label").textContent = result.label;
-  renderFormula(result.rows);
-  $("cache-note").textContent = result.note;
-  renderBreakdown([...result.breakdown, ["Tensor parallel size", tp], ["Per-device cache size", formatBytes(result.perDevice)]]);
-  const sourceUrl = `https://huggingface.co/${model.source}/raw/main/config.json`;
-  $("source").textContent = sourceUrl;
-  $("source-link").href = sourceUrl;
-}
+  const BYTES_PER_GB = 1e9;
+  const BYTES_PER_GIB = 1024 ** 3;
 
-$("family").addEventListener("change", fillModels);
-$("model").addEventListener("change", syncModel);
-$("cache-form").addEventListener("input", calculate);
-fillModels();
+  function numericField(model, name, fallback) {
+    const value = Number(model && model.fields && model.fields[name]);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function visibleFamily(model) {
+    return Core.modelFamily(model);
+  }
+
+  function families(models) {
+    return Array.from(new Set(models.map(visibleFamily))).sort(function (a, b) {
+      return a.localeCompare(b);
+    });
+  }
+
+  function modelsForFamily(models, family) {
+    return models.filter(function (model) {
+      return visibleFamily(model) === family;
+    });
+  }
+
+  function validTpSizes(model) {
+    const kvHeads = Math.max(1, Math.floor(numericField(model, "num_key_value_heads", 1)));
+    return Array.from({ length: kvHeads }, function (_, index) {
+      return index + 1;
+    }).filter(function (tp) {
+      return kvHeads % tp === 0;
+    });
+  }
+
+  function hasIndexer(model) {
+    return Number.isFinite(numericField(model, "index_head_dim", NaN));
+  }
+
+  function draftLayerCount(model) {
+    if (!model || !model.fields || model.fields.disable_draft_kv_cache === true) {
+      return 0;
+    }
+    const nextN = numericField(model, "num_nextn_predict_layers", 0);
+    if (nextN > 0) {
+      return nextN;
+    }
+    if (model.fields.use_mtp === true) {
+      return numericField(model, "num_mtp_modules", 0)
+        * numericField(model, "mtp_transformer_layers", 0);
+    }
+    return 0;
+  }
+
+  function hasDraftCache(model) {
+    if (model.formula === "deepseek_v4_hybrid") {
+      const mainLayers = numericField(model, "num_hidden_layers", 0);
+      return Array.isArray(model.fields.compress_ratios)
+        && model.fields.compress_ratios.length > mainLayers;
+    }
+    return draftLayerCount(model) > 0;
+  }
+
+  function hasLinearState(model) {
+    return model.formula === "qwen_linear_full_hybrid";
+  }
+
+  function defaultPrecision(model) {
+    return model.formula === "deepseek_v4_hybrid" ? "fp8_int8" : "bf16_fp16";
+  }
+
+  function defaultIndexerPrecision(model) {
+    return model.formula === "deepseek_v4_hybrid" ? "fp4_int4" : "bf16_fp16";
+  }
+
+  function modelForCalculation(model) {
+    if (model.id !== "minimax-m3") {
+      return model;
+    }
+    const fields = Object.assign({}, model.fields);
+    delete fields.indexer_fixed_precision_id;
+    return Object.assign({}, model, { fields: fields });
+  }
+
+  function precisionConfig(data) {
+    return {
+      precisionOptions: data.precision_options,
+      indexerPrecisionOptions: data.indexer_precision_options
+    };
+  }
+
+  function calculateView(model, input, data) {
+    const sourceData = data || MODEL_DATA;
+    const requestedTp = Math.max(1, Math.floor(Number(input.tensorParallel) || 1));
+    const options = validTpSizes(model);
+    if (!options.includes(requestedTp)) {
+      throw new RangeError(
+        "TP size " + requestedTp + " is invalid because num_key_value_heads / TP must be an integer."
+      );
+    }
+
+    const result = Core.calculate(
+      modelForCalculation(model),
+      {
+        tokens: input.tokens,
+        sequences: input.sequences,
+        precision: input.precision || defaultPrecision(model),
+        indexerPrecision: input.indexerPrecision || defaultIndexerPrecision(model),
+        includeDraftKvCache: Boolean(input.includeDraftKvCache),
+        includeLinearAttentionState: Boolean(input.includeLinearAttentionState),
+        tensorParallel: 1
+      },
+      precisionConfig(sourceData)
+    );
+
+    const deviceGroups = result.cacheGroups.map(function (group) {
+      const replicated = group.role === "indexer";
+      const perDeviceBytes = replicated ? group.bytes : group.bytes / requestedTp;
+      return Object.assign({}, group, {
+        replicated: replicated,
+        perDeviceBytes: perDeviceBytes,
+        allDeviceBytes: perDeviceBytes * requestedTp
+      });
+    });
+    const perDeviceBytes = deviceGroups.reduce(function (sum, group) {
+      return sum + group.perDeviceBytes;
+    }, 0);
+    const allDeviceBytes = deviceGroups.reduce(function (sum, group) {
+      return sum + group.allDeviceBytes;
+    }, 0);
+
+    return Object.assign({}, result, {
+      model: model,
+      tensorParallel: requestedTp,
+      logicalBytes: result.totalBytes,
+      perDeviceBytes: perDeviceBytes,
+      perDeviceGiB: perDeviceBytes / BYTES_PER_GIB,
+      perDeviceGB: perDeviceBytes / BYTES_PER_GB,
+      allDeviceBytes: allDeviceBytes,
+      deviceGroups: deviceGroups,
+      perDeviceBytesPerSequence: perDeviceBytes / result.sequences,
+      perDeviceBytesPerToken: perDeviceBytes / (result.tokens * result.sequences)
+    });
+  }
+
+  function formatNumber(value) {
+    if (typeof value !== "number") {
+      return value;
+    }
+    return value.toLocaleString(undefined, {
+      maximumFractionDigits: Number.isInteger(value) ? 0 : 2
+    });
+  }
+
+  function scaledDetail(label, value, help, divisor, nextLabel) {
+    return [
+      nextLabel || label,
+      typeof value === "number" ? value / divisor : value,
+      help
+    ];
+  }
+
+  function detailsForView(view) {
+    const model = view.model;
+    const formula = model.formula;
+    const tp = view.tensorParallel;
+    const original = view.components.map(function (row) {
+      return row.slice();
+    });
+    const values = Object.fromEntries(original.map(function (row) {
+      return [row[0], row[1]];
+    }));
+    const rows = [];
+
+    original.forEach(function (row) {
+      const label = row[0];
+      const value = row[1];
+      const help = row[2];
+
+      if (formula === "minimax_msa" && label === "Index heads") {
+        rows.push(["Index Q heads", numericField(model, "index_n_heads", 4), help]);
+        rows.push([
+          "Index K heads",
+          1,
+          "The Indexer stores one key head, replicated across tensor-parallel devices."
+        ]);
+        return;
+      }
+
+      if ((formula === "standard_gqa" || formula === "mla") && label === "Per-token elements") {
+        rows.push(scaledDetail(
+          label,
+          value,
+          help,
+          tp,
+          "Per-device KV elements per token"
+        ));
+        return;
+      }
+
+      if (formula === "dsa_mla") {
+        if (label === "KV elements per token") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device KV elements per token"));
+          return;
+        }
+        if (label === "Indexer elements per token") {
+          rows.push(["Per-device Indexer elements per token", value, help]);
+          return;
+        }
+        if (label === "Per-token elements") {
+          const kv = Number(values["KV elements per token"]) || 0;
+          const indexer = Number(values["Indexer elements per token"]) || 0;
+          rows.push([
+            "Per-device total elements per token",
+            kv / tp + indexer,
+            help
+          ]);
+          return;
+        }
+      }
+
+      if (formula === "qwen_linear_full_hybrid") {
+        if (label === "Linear conv elements") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device linear conv elements"));
+          return;
+        }
+        if (label === "Linear recurrent elements") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device linear recurrent elements"));
+          return;
+        }
+        if (label === "Per-token elements") {
+          rows.push(scaledDetail(
+            label,
+            value,
+            help,
+            tp,
+            "Per-device KV elements per token"
+          ));
+          return;
+        }
+      }
+
+      if (formula === "mixed_full_sliding_gqa") {
+        if (label === "Full-attention elements") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device full-attention elements"));
+          return;
+        }
+        if (label === "Sliding-window elements") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device sliding-window elements"));
+          return;
+        }
+      }
+
+      if (formula === "minimax_msa") {
+        if (label === "KV elements per token") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device KV elements per token"));
+          return;
+        }
+        if (label === "Indexer elements per token") {
+          rows.push(["Per-device Indexer elements per token", value, help]);
+          return;
+        }
+      }
+
+      if (formula === "deepseek_v4_hybrid") {
+        const shardedLabels = [
+          "Ratio=0 KV elements",
+          "Sliding-window elements",
+          "Compressed elements",
+          "KV elements"
+        ];
+        if (shardedLabels.includes(label)) {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device " + label.toLowerCase()));
+          return;
+        }
+        if (label === "Indexer elements") {
+          rows.push(["Per-device Indexer elements", value, help]);
+          return;
+        }
+      }
+
+      rows.push(row);
+    });
+
+    rows.push(["Tensor parallel size", tp]);
+    rows.push(["Per-device cache size", Core.formatBytes(view.perDeviceBytes)]);
+    return rows;
+  }
+
+  function formulaRowsForView(view) {
+    const rows = (view.elementPlan.formulaRows || []).map(function (row) {
+      return {
+        name: row.name,
+        expression: row.expression,
+        description: row.description
+      };
+    });
+    const hasReplicatedIndexer = view.deviceGroups.some(function (group) {
+      return group.replicated;
+    });
+    if (hasReplicatedIndexer) {
+      rows.push({
+        name: "per_device_bytes",
+        expression: "sharded_cache_bytes / TP size + replicated_indexer_bytes",
+        description: "The indexer has one stored key head and is replicated on every TP device."
+      });
+      rows.push({
+        name: "all_device_bytes",
+        expression: "sharded_cache_bytes + TP size × replicated_indexer_bytes",
+        description: "Physical cache across all devices includes one indexer copy per TP device."
+      });
+    } else {
+      rows.push({
+        name: "per_device_bytes",
+        expression: "total_bytes / TP size",
+        description: "The cache is evenly sharded across valid tensor-parallel devices."
+      });
+      rows.push({
+        name: "all_device_bytes",
+        expression: "total_bytes",
+        description: "Sharded cache is counted once across all tensor-parallel devices."
+      });
+    }
+    return rows;
+  }
+
+  function metricRowsForView(view) {
+    const groups = view.deviceGroups;
+    const first = groups[0]
+      ? ["Per-device " + groups[0].label, groups[0].perDeviceBytes]
+      : ["Per-device cache", view.perDeviceBytes];
+    const second = groups[1]
+      ? ["Per-device " + groups[1].label, groups[1].perDeviceBytes]
+      : ["Per-device per sequence size", view.perDeviceBytesPerSequence];
+    return [
+      first,
+      second,
+      ["Per-device per token size", view.perDeviceBytesPerToken]
+    ];
+  }
+
+  function appendHelp(label, help, doc) {
+    if (!help) {
+      return;
+    }
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.className = "kv-help";
+    button.textContent = "?";
+    button.setAttribute("aria-label", help);
+    button.dataset.tooltip = help;
+    label.append(button);
+  }
+
+  function renderFormula(container, rows, doc) {
+    container.replaceChildren.apply(container, rows.map(function (item) {
+      const row = doc.createElement("div");
+      row.className = "formula-row";
+      const name = doc.createElement("span");
+      name.className = "formula-name";
+      name.textContent = item.name;
+      appendHelp(name, item.description, doc);
+      const equals = doc.createElement("span");
+      equals.className = "formula-equals";
+      equals.textContent = "=";
+      const expression = doc.createElement("span");
+      expression.className = "formula-expression";
+      expression.textContent = item.expression;
+      row.append(name, equals, expression);
+      return row;
+    }));
+  }
+
+  function renderBreakdown(container, rows, doc) {
+    container.replaceChildren.apply(container, rows.map(function (item) {
+      const row = doc.createElement("div");
+      row.className = "breakdown-row";
+      const label = doc.createElement("span");
+      label.textContent = item[0];
+      appendHelp(label, item[2], doc);
+      const value = doc.createElement("strong");
+      value.textContent = formatNumber(item[1]);
+      row.append(label, value);
+      return row;
+    }));
+  }
+
+  function setOptions(select, options, value, doc) {
+    select.replaceChildren.apply(select, options.map(function (optionData) {
+      const option = doc.createElement("option");
+      option.value = optionData.value;
+      option.textContent = optionData.label;
+      return option;
+    }));
+    if (options.some(function (optionData) { return optionData.value === value; })) {
+      select.value = value;
+    }
+  }
+
+  function mount(doc, data) {
+    if (!doc) {
+      return;
+    }
+    const sourceData = data || MODEL_DATA;
+    const get = function (id) {
+      return doc.getElementById(id);
+    };
+    const form = get("cache-form");
+    if (!form) {
+      return;
+    }
+
+    const controls = {
+      family: get("family"),
+      model: get("model"),
+      tokens: get("tokens"),
+      sequences: get("sequences"),
+      tensorParallel: get("tensor-parallel"),
+      precision: get("precision"),
+      indexerPrecision: get("indexer"),
+      indexerControl: get("indexer-control"),
+      draft: get("draft"),
+      draftControl: get("draft-control"),
+      linear: get("linear"),
+      linearControl: get("linear-control")
+    };
+
+    setOptions(
+      controls.precision,
+      sourceData.precision_options.map(function (option) {
+        return { value: option.id, label: option.label };
+      }),
+      "bf16_fp16",
+      doc
+    );
+    setOptions(
+      controls.indexerPrecision,
+      sourceData.indexer_precision_options.map(function (option) {
+        return { value: option.id, label: option.label };
+      }),
+      "bf16_fp16",
+      doc
+    );
+
+    const familyOptions = families(sourceData.models).map(function (family) {
+      return { value: family, label: family };
+    });
+    setOptions(controls.family, familyOptions, "MiniMax", doc);
+
+    function selectedModel() {
+      return sourceData.models.find(function (model) {
+        return model.id === controls.model.value;
+      }) || modelsForFamily(sourceData.models, controls.family.value)[0];
+    }
+
+    function fillModels(preferredId) {
+      const models = modelsForFamily(sourceData.models, controls.family.value);
+      setOptions(
+        controls.model,
+        models.map(function (model) {
+          return { value: model.id, label: model.label };
+        }),
+        preferredId,
+        doc
+      );
+    }
+
+    function render() {
+      try {
+        const model = selectedModel();
+        const view = calculateView(model, {
+          tokens: controls.tokens.value,
+          sequences: controls.sequences.value,
+          tensorParallel: controls.tensorParallel.value,
+          precision: controls.precision.value,
+          indexerPrecision: controls.indexerPrecision.value,
+          includeDraftKvCache: controls.draft.checked,
+          includeLinearAttentionState: controls.linear.checked
+        }, sourceData);
+
+        get("per-device-gib").textContent = view.perDeviceGiB.toFixed(5) + " GiB";
+        get("per-device-gb").textContent = "= " + view.perDeviceGB.toFixed(5) + " GB";
+        get("total-cache-metric").textContent = Core.formatBytes(view.allDeviceBytes);
+
+        const metrics = metricRowsForView(view);
+        get("metric-one-label").textContent = metrics[0][0];
+        get("metric-one").textContent = Core.formatBytes(metrics[0][1]);
+        get("metric-two-label").textContent = metrics[1][0];
+        get("metric-two").textContent = Core.formatBytes(metrics[1][1]);
+        get("metric-three-label").textContent = metrics[2][0];
+        get("metric-three").textContent = Core.formatBytes(metrics[2][1]);
+
+        get("formula-label").textContent = view.elementPlan.formulaLabel;
+        renderFormula(get("formula-list"), formulaRowsForView(view), doc);
+        const tpNote = view.deviceGroups.some(function (group) { return group.replicated; })
+          ? " Per-device values shard non-indexer cache across TP and replicate the one-key-head indexer cache on every device."
+          : " Per-device values assume even cache sharding across valid TP devices.";
+        get("cache-note").textContent = view.elementPlan.note + tpNote;
+        renderBreakdown(get("breakdown"), detailsForView(view), doc);
+
+        get("source").textContent = model.source_url;
+        get("source-link").href = model.source_url;
+      } catch (error) {
+        get("cache-note").textContent = error.message;
+      }
+    }
+
+    function syncModel() {
+      const model = selectedModel();
+      controls.tokens.value = String(model.default_tokens || 1024);
+      controls.tokens.max = String(model.max_position_embeddings || "");
+
+      const tpOptions = validTpSizes(model).map(function (tp) {
+        return { value: String(tp), label: String(tp) };
+      });
+      setOptions(controls.tensorParallel, tpOptions, "1", doc);
+      controls.precision.value = defaultPrecision(model);
+      controls.indexerPrecision.value = defaultIndexerPrecision(model);
+
+      controls.indexerControl.hidden = !hasIndexer(model);
+      controls.draftControl.hidden = !hasDraftCache(model);
+      controls.draft.checked = false;
+      controls.linearControl.hidden = !hasLinearState(model);
+      controls.linear.checked = hasLinearState(model);
+      render();
+    }
+
+    controls.family.addEventListener("change", function () {
+      fillModels();
+      syncModel();
+    });
+    controls.model.addEventListener("change", syncModel);
+    form.addEventListener("input", function (event) {
+      if (event.target !== controls.family && event.target !== controls.model) {
+        render();
+      }
+    });
+
+    fillModels("minimax-m3");
+    syncModel();
+  }
+
+  return {
+    calculateView: calculateView,
+    defaultIndexerPrecision: defaultIndexerPrecision,
+    defaultPrecision: defaultPrecision,
+    detailsForView: detailsForView,
+    families: families,
+    hasDraftCache: hasDraftCache,
+    hasIndexer: hasIndexer,
+    hasLinearState: hasLinearState,
+    metricRowsForView: metricRowsForView,
+    modelsForFamily: modelsForFamily,
+    mount: mount,
+    validTpSizes: validTpSizes
+  };
+});

@@ -10,9 +10,23 @@
 python3 -m http.server 8000 --directory web
 ```
 
-然后访问 `http://localhost:8000`。网页支持 MiniMax M3 的主 KV / MSA Indexer cache，以及 Qwen3.6-27B 的 Full Attention KV 和可选 Linear Attention runtime state。
+然后访问 `http://localhost:8000`。网页内置 9 个模型家族、52 个模型，并支持 TP、KV/Indexer 精度、Draft KV 和 Qwen Linear Attention runtime state 等模型相关选项。
 
-根据 HuggingFace 风格的 `config.json` **估算 decoder KV cache 占用字节数**，用于容量规划或和实测对照。支持两类结构，由配置自动分流。
+### 网页支持范围
+
+- DeepSeek：V4 Pro、V4 Flash、V3.2、V3、R1
+- GLM：GLM-5、GLM-5.1、GLM-5.2
+- Kimi：K2.5、K2.6
+- Qwen：Qwen3.6、Qwen3.5、Qwen3、Qwen2.5 共 23 个模型
+- Llama：Llama 3.1 8B/70B、Llama 3.3 70B
+- Gemma：Gemma 4 E2B、E4B、26B-A4B、31B
+- Cohere：Command R、R+、R7B、A、A Plus
+- MiMo：MiMo-V2.5、MiMo-V2.5-Pro
+- MiniMax：M2、M2.1、M2.5、M2.7、M3
+
+网页覆盖 Standard MHA/GQA、MLA、DSA/MLA + Indexer、Qwen Linear/Full Hybrid、Full/Sliding GQA、MiniMax MSA 和 DeepSeek V4 Hybrid 七套容量公式。模型数据和公式来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+Python CLI 根据 HuggingFace 风格的 `config.json` **估算 decoder KV cache 占用字节数**，用于容量规划或和实测对照。CLI 支持以下两类结构，由配置自动分流。
 
 ## 安装
 
@@ -68,6 +82,7 @@ spec.print_report(model_source="...", num_tokens=8192, batch=1, indexer_layout="
 
 ## 测试
 
+- 静态网页全部 52 个模型和 TP 规则：`node --test tests/web_calculator.test.mjs`
 - 用例从 **ModelScope** 拉取对应模型的 `config.json`，期望值集中在 **`tests/kv_cache_expected.json`**；上游 config 变更时需更新该 JSON。
 - 无网或 CI 可跳过：`SKIP_MODELSCOPE=1 pytest tests/`
 - 在 **`kv_cache_calculator`** 目录下：`python3 -m pytest tests/ -q`
@@ -81,9 +96,12 @@ web/                     # 零依赖静态网页
   index.html             # 页面结构
   assets/
     styles.css           # 页面样式
-    script.js            # MiniMax M3 计算和交互
+    models.js            # 52 个静态模型配置
+    calculator-core.js   # 七套容量计算公式
+    script.js            # TP 分布、页面交互和渲染
 kv_cache_size.py         # Python CLI 与计算 API
 tests/
+  web_calculator.test.mjs
   test_kv_cache_size.py
   kv_cache_expected.json
 requirements.txt         # CLI 运行依赖

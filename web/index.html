@@ -62,16 +62,17 @@
           <label class="field">
             <span>KV precision</span>
             <select id="precision">
-              <option value="2">BF16 / FP16</option>
-              <option value="1">FP8 / INT8</option>
-              <option value="0.5">FP4 / INT4</option>
+              <option value="bf16_fp16">BF16 / FP16</option>
+              <option value="fp8_int8">FP8 / INT8</option>
+              <option value="fp4_int4">FP4 / INT4</option>
             </select>
           </label>
           <label class="field field-wide" id="indexer-control" hidden>
             <span>Indexer precision</span>
             <select id="indexer">
-              <option value="2">BF16 / FP16</option>
-              <option value="1">FP8 / INT8</option>
+              <option value="bf16_fp16">BF16 / FP16</option>
+              <option value="fp8_int8">FP8 / INT8</option>
+              <option value="fp4_int4">FP4 / INT4</option>
             </select>
           </label>
         </div>
@@ -174,6 +175,8 @@
       sync();
     })();
   </script>
+  <script src="assets/models.js"></script>
+  <script src="assets/calculator-core.js"></script>
   <script src="assets/script.js"></script>
 </body>
 </html>

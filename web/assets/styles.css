@@ -451,8 +451,17 @@ select:focus {
   overflow: visible;
 }
 
+.formula-panel {
+  overflow: visible;
+}
+
+.formula-panel > .panel-heading,
 .breakdown-panel > .panel-heading {
   border-radius: 9px 9px 0 0;
+}
+
+.formula-panel > .cache-note {
+  border-radius: 0 0 9px 9px;
 }
 
 .detail-panel {

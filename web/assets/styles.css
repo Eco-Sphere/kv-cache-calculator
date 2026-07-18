@@ -25,7 +25,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   color: var(--text);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.45;
   transition: color 160ms ease, background-color 160ms ease;
 }
@@ -38,7 +38,7 @@ select {
 
 .page-shell {
   position: relative;
-  width: min(1180px, calc(100% - 40px));
+  width: min(1240px, calc(100% - 40px));
   margin: 0 auto;
   padding: 28px 0 48px;
 }
@@ -53,7 +53,7 @@ select {
 
 .page-header h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 650;
   letter-spacing: -0.025em;
 }
@@ -61,7 +61,7 @@ select {
 .page-header p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .header-actions {
@@ -82,7 +82,7 @@ select {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 0 0 1px rgb(62 79 69 / 0.06);
   -webkit-backdrop-filter: blur(14px) saturate(150%);
   backdrop-filter: blur(14px) saturate(150%);
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -107,7 +107,7 @@ select {
   -webkit-backdrop-filter: blur(14px) saturate(150%);
   backdrop-filter: blur(14px) saturate(150%);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -144,7 +144,7 @@ select {
 
 .workspace {
   display: grid;
-  grid-template-columns: 332px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   align-items: start;
   gap: 14px;
 }
@@ -203,7 +203,7 @@ select {
 .card-heading h2,
 .result-heading h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 19px;
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -246,14 +246,14 @@ select {
 
 .field > span {
   color: #50504c;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 550;
 }
 
 input,
 select {
   width: 100%;
-  height: 34px;
+  height: 42px;
   min-width: 0;
   padding: 0 9px;
   border: 1px solid rgb(65 79 71 / 0.19);
@@ -319,21 +319,21 @@ select:focus {
 }
 
 .check-row strong {
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .check-row small {
   margin-top: 1px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
 .empty-option {
   margin: 0;
   color: var(--quiet);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .option-group:has(.check-row:not([hidden])) .empty-option {
@@ -359,14 +359,14 @@ select:focus {
   display: block;
   margin-bottom: 5px;
   color: #4f6e62;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .primary-result strong {
   display: block;
   color: #193f32;
-  font-size: clamp(25px, 3vw, 34px);
+  font-size: clamp(32px, 3vw, 40px);
   font-weight: 650;
   letter-spacing: -0.045em;
   line-height: 1;
@@ -376,7 +376,7 @@ select:focus {
 .primary-result em {
   margin-bottom: 2px;
   color: #547267;
-  font-size: 11px;
+  font-size: 14px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -412,21 +412,21 @@ select:focus {
 .metric span {
   min-height: 31px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.35;
 }
 
 .metric span small {
   display: inline;
   color: var(--quiet);
-  font-size: 9px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
 .metric strong {
   margin-top: 4px;
   overflow: hidden;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 650;
   letter-spacing: -0.015em;
   text-overflow: ellipsis;
@@ -485,7 +485,7 @@ select:focus {
 
 .panel-heading span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.055em;
   text-transform: uppercase;
@@ -493,7 +493,7 @@ select:focus {
 
 .panel-heading strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -510,7 +510,7 @@ select:focus {
   padding: 7px 0;
   border-bottom: 1px solid var(--line-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -540,7 +540,7 @@ select:focus {
   border-top: 1px solid var(--line-soft);
   color: var(--muted);
   background: rgb(246 248 246 / 0.72);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -553,7 +553,7 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  min-height: 29px;
+  min-height: 36px;
   padding: 5px 0;
   border-bottom: 1px solid var(--line-soft);
 }
@@ -567,14 +567,14 @@ select:focus {
   align-items: center;
   min-width: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .breakdown-row > strong {
   flex: 0 0 auto;
   max-width: 48%;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 650;
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -584,8 +584,8 @@ select:focus {
   position: relative;
   display: inline-grid;
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   place-items: center;
   margin-left: 5px;
   padding: 0;
@@ -593,7 +593,7 @@ select:focus {
   border-radius: 50%;
   color: var(--muted);
   background: transparent;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1;
   cursor: help;
 }
@@ -614,7 +614,7 @@ select:focus {
   box-shadow: 0 4px 14px rgb(20 20 18 / 0.12);
   content: attr(data-tooltip);
   font-family: Inter, ui-sans-serif, sans-serif;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   line-height: 1.4;
   opacity: 0;
@@ -639,7 +639,7 @@ select:focus {
   padding: 9px 12px;
   border-top: 1px solid var(--line-soft);
   color: var(--quiet);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .source-row a {
@@ -850,7 +850,7 @@ select:focus {
 
 @media (max-width: 920px) {
   .workspace {
-    grid-template-columns: 286px minmax(0, 1fr);
+    grid-template-columns: 312px minmax(0, 1fr);
   }
 
   .detail-grid {
@@ -881,7 +881,7 @@ select:focus {
   }
 
   .page-header h1 {
-    font-size: 19px;
+    font-size: 25px;
   }
 
   .workspace {
@@ -935,7 +935,7 @@ select:focus {
   }
 
   .primary-result strong {
-    font-size: 27px;
+    font-size: 34px;
   }
 
   .metric-grid {

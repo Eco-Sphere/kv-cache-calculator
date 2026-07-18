@@ -10,7 +10,7 @@
 python3 -m http.server 8000 --directory web
 ```
 
-然后访问 `http://localhost:8000`。当前网页专用于 MiniMax M3，分别估算主 KV cache 与 MSA Indexer cache。
+然后访问 `http://localhost:8000`。网页支持 MiniMax M3 的主 KV / MSA Indexer cache，以及 Qwen3.6-27B 的 Full Attention KV 和可选 Linear Attention runtime state。
 
 根据 HuggingFace 风格的 `config.json` **估算 decoder KV cache 占用字节数**，用于容量规划或和实测对照。支持两类结构，由配置自动分流。
 

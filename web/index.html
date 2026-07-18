@@ -1,54 +1,179 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="KV Cache Size Calculator">
+  <meta name="description" content="Calculate per-device and all-device KV cache memory for tensor-parallel inference.">
+  <meta name="color-scheme" content="light dark">
   <title>KV Cache Size Calculator</title>
+  <script>
+    try {
+      document.documentElement.dataset.theme = localStorage.getItem("kv-theme") || "light";
+    } catch (_) {}
+  </script>
   <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
-  <main class="page">
-    <h1>KV Cache Size Calculator</h1>
-    <section class="calculator">
-      <div class="calculator-grid">
-        <form class="controls" id="cache-form" onsubmit="return false">
-          <label><span>Model family</span><select id="family"></select></label>
-          <label><span>Model</span><select id="model"></select></label>
-          <label><span>Tokens per sequence</span><input id="tokens" type="number" min="1" step="1" value="1024"></label>
-          <label><span>Sequences</span><input id="sequences" type="number" min="1" step="1" value="1"></label>
-          <label><span>TP size</span><select id="tensor-parallel"></select></label>
-          <label><span>KV precision</span><select id="precision"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option><option value="0.5">FP4 / INT4</option></select></label>
-          <label id="indexer-control" hidden><span>Indexer precision</span><select id="indexer"><option value="2">BF16 / FP16</option><option value="1">FP8 / INT8</option></select></label>
-          <label class="checkbox-row" id="draft-control" hidden><input id="draft" type="checkbox"><span title="Adds model-specific MTP/draft KV layers when enabled by the serving stack.">Include draft KV cache</span></label>
-          <label class="checkbox-row" id="linear-control" hidden><input id="linear" type="checkbox" checked><span title="Adds Qwen3.6 Gated DeltaNet convolution and recurrent runtime state.">Include linear-attention state</span></label>
-          <div class="cta-note">
-            <p>Found an issue or have feedback? <a href="#">Open an issue</a> and let us know.</p>
-          </div>
-        </form>
+  <main class="page-shell">
+    <header class="page-header">
+      <div>
+        <h1>KV Cache Size Calculator</h1>
+        <p>Estimate per-device cache memory for tensor-parallel inference.</p>
+      </div>
+      <div class="header-actions">
+        <span class="status"><i aria-hidden="true"></i>Live estimate</span>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切换到深色模式" aria-pressed="false">
+          <span class="theme-toggle-track" aria-hidden="true"><i></i></span>
+          <span class="theme-toggle-label">Dark</span>
+        </button>
+      </div>
+    </header>
 
-        <div class="results" aria-live="polite">
-          <div class="total-band">
-            <div><span>Per device size</span><strong id="per-device-gib">--</strong></div>
-            <em id="per-device-gb">= -- GB</em>
+    <section class="workspace" aria-label="KV cache calculator">
+      <form class="control-card" id="cache-form" onsubmit="return false">
+        <div class="card-heading">
+          <h2>Model &amp; workload</h2>
+        </div>
+
+        <div class="field-group">
+          <label class="field field-wide">
+            <span>Model family</span>
+            <select id="family"></select>
+          </label>
+          <label class="field field-wide">
+            <span>Model</span>
+            <select id="model"></select>
+          </label>
+        </div>
+
+        <div class="field-group field-grid">
+          <label class="field">
+            <span>Tokens per sequence</span>
+            <input id="tokens" type="number" min="1" step="1" value="1024" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span>Sequences</span>
+            <input id="sequences" type="number" min="1" step="1" value="1" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span>TP size</span>
+            <select id="tensor-parallel"></select>
+          </label>
+          <label class="field">
+            <span>KV precision</span>
+            <select id="precision">
+              <option value="2">BF16 / FP16</option>
+              <option value="1">FP8 / INT8</option>
+              <option value="0.5">FP4 / INT4</option>
+            </select>
+          </label>
+          <label class="field field-wide" id="indexer-control" hidden>
+            <span>Indexer precision</span>
+            <select id="indexer">
+              <option value="2">BF16 / FP16</option>
+              <option value="1">FP8 / INT8</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="field-group option-group">
+          <label class="check-row" id="draft-control" hidden>
+            <input id="draft" type="checkbox">
+            <span>
+              <strong>Include draft KV cache</strong>
+              <small>Count model-specific MTP or draft layers.</small>
+            </span>
+          </label>
+          <label class="check-row" id="linear-control" hidden>
+            <input id="linear" type="checkbox" checked>
+            <span>
+              <strong>Include linear-attention state</strong>
+              <small>Add convolution and recurrent runtime state.</small>
+            </span>
+          </label>
+          <p class="empty-option">Model-specific runtime options appear here.</p>
+        </div>
+      </form>
+
+      <section class="result-card" aria-live="polite" aria-label="Calculation result">
+        <div class="result-heading">
+          <h2>Memory footprint</h2>
+        </div>
+
+        <div class="primary-result">
+          <div>
+            <span>Per device size</span>
+            <strong id="per-device-gib">--</strong>
           </div>
-          <div class="metric-grid">
-            <div><span id="metric-one-label">Per sequence</span><strong id="metric-one">--</strong></div>
-            <div><span id="metric-two-label">Per token</span><strong id="metric-two">--</strong></div>
-            <div><span id="metric-three-label">Bytes per element</span><strong id="metric-three">--</strong></div>
-            <div><span>Total cache size (all devices)</span><strong id="total-cache-metric">--</strong></div>
-          </div>
-          <div class="formula-panel">
-            <div class="formula-heading" id="formula-label">--</div>
+          <em id="per-device-gb">= -- GB</em>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric">
+            <span id="metric-one-label">Per sequence</span>
+            <strong id="metric-one">--</strong>
+          </article>
+          <article class="metric">
+            <span id="metric-two-label">Per token</span>
+            <strong id="metric-two">--</strong>
+          </article>
+          <article class="metric">
+            <span id="metric-three-label">Bytes per element</span>
+            <strong id="metric-three">--</strong>
+          </article>
+          <article class="metric metric-total">
+            <span>Total cache size <small>all devices</small></span>
+            <strong id="total-cache-metric">--</strong>
+          </article>
+        </div>
+
+        <div class="detail-grid">
+          <section class="detail-panel formula-panel">
+            <div class="panel-heading">
+              <span>Calculation</span>
+              <strong id="formula-label">--</strong>
+            </div>
             <div class="formula-list" id="formula-list"></div>
-            <p id="cache-note">--</p>
+            <p class="cache-note" id="cache-note">--</p>
+          </section>
+        </div>
+
+        <section class="detail-panel breakdown-panel">
+          <div class="panel-heading">
+            <span>Model details</span>
           </div>
           <div class="breakdown" id="breakdown"></div>
-          <a class="source-link" id="source-link" href="#" target="_blank" rel="noopener">Source: <span id="source">--</span></a>
-        </div>
-      </div>
+          <footer class="source-row">
+            <span>Model configuration</span>
+            <a id="source-link" href="#" target="_blank" rel="noopener">
+              <span id="source">--</span>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3 5 11M11 9v4H3V5h4"/></svg>
+            </a>
+          </footer>
+        </section>
+      </section>
     </section>
   </main>
+
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const toggle = document.getElementById("theme-toggle");
+      const label = toggle.querySelector(".theme-toggle-label");
+      const sync = () => {
+        const dark = root.dataset.theme === "dark";
+        toggle.setAttribute("aria-pressed", String(dark));
+        toggle.setAttribute("aria-label", dark ? "切换到浅色模式" : "切换到深色模式");
+        label.textContent = dark ? "Light" : "Dark";
+      };
+      toggle.addEventListener("click", () => {
+        root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+        try { localStorage.setItem("kv-theme", root.dataset.theme); } catch (_) {}
+        sync();
+      });
+      sync();
+    })();
+  </script>
   <script src="assets/script.js"></script>
 </body>
 </html>

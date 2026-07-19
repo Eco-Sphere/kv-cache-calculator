@@ -109,6 +109,15 @@ test("invalid TP size is rejected", () => {
   );
 });
 
+test("TP help explains why only KV-head divisors are available", () => {
+  const item = model("minimax-m3");
+  assert.deepEqual(app.validTpSizes(item), [1, 2, 4]);
+  assert.equal(
+    app.tpHelpText(item),
+    "This model has 4 KV heads, so TP size can be 1, 2, or 4. Only divisors are shown because num_key_value_heads / TP size must be an integer, giving each device a whole number of KV heads.",
+  );
+});
+
 test("legacy numeric precision values do not produce NaN", () => {
   const item = model("minimax-m3");
   const result = app.calculateView(item, inputFor(item, {

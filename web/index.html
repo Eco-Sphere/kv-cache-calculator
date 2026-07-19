@@ -11,7 +11,7 @@
       document.documentElement.dataset.theme = localStorage.getItem("kv-theme") || "light";
     } catch (_) {}
   </script>
-  <link rel="stylesheet" href="assets/styles.css?v=20260718-1">
+  <link rel="stylesheet" href="assets/styles.css?v=20260719-1">
 </head>
 <body>
   <main class="page-shell">
@@ -55,10 +55,24 @@
             <span>Sequences</span>
             <input id="sequences" type="number" min="1" step="1" value="1" inputmode="numeric">
           </label>
-          <label class="field">
-            <span>TP size</span>
-            <select id="tensor-parallel"></select>
-          </label>
+          <div class="field">
+            <span class="field-label">
+              <label for="tensor-parallel">TP size</label>
+              <button
+                class="kv-help"
+                id="tp-help"
+                type="button"
+                aria-label="Why are only these TP sizes available?"
+                aria-describedby="tp-help-description"
+                aria-expanded="false"
+                data-tooltip="TP sizes must divide the model's KV-head count evenly."
+              >?</button>
+            </span>
+            <select id="tensor-parallel" aria-describedby="tp-help-description"></select>
+            <span class="visually-hidden" id="tp-help-description">
+              TP sizes must divide the model's KV-head count evenly.
+            </span>
+          </div>
           <label class="field">
             <span>KV precision</span>
             <select id="precision">
@@ -175,8 +189,8 @@
       sync();
     })();
   </script>
-  <script src="assets/models.js?v=20260718-1"></script>
-  <script src="assets/calculator-core.js?v=20260718-1"></script>
-  <script src="assets/script.js?v=20260718-1"></script>
+  <script src="assets/models.js?v=20260719-1"></script>
+  <script src="assets/calculator-core.js?v=20260719-1"></script>
+  <script src="assets/script.js?v=20260719-1"></script>
 </body>
 </html>

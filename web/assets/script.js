@@ -68,6 +68,19 @@
     });
   }
 
+  function tpHelpText(model) {
+    const kvHeads = Math.max(1, Math.floor(numericField(model, "num_key_value_heads", 1)));
+    const sizes = validTpSizes(model);
+    const choices = sizes.length === 1
+      ? String(sizes[0])
+      : sizes.length === 2
+        ? sizes.join(" or ")
+        : sizes.slice(0, -1).join(", ") + ", or " + sizes[sizes.length - 1];
+    const headLabel = kvHeads === 1 ? "KV head" : "KV heads";
+    return "This model has " + kvHeads + " " + headLabel + ", so TP size can be " + choices
+      + ", because num_key_value_heads / TP size must be an integer.";
+  }
+
   function hasIndexer(model) {
     return Number.isFinite(numericField(model, "index_head_dim", NaN));
   }
@@ -454,6 +467,8 @@
       tokens: get("tokens"),
       sequences: get("sequences"),
       tensorParallel: get("tensor-parallel"),
+      tpHelp: get("tp-help"),
+      tpHelpDescription: get("tp-help-description"),
       precision: get("precision"),
       indexerPrecision: get("indexer"),
       indexerControl: get("indexer-control"),
@@ -552,6 +567,10 @@
         return { value: String(tp), label: String(tp) };
       });
       setOptions(controls.tensorParallel, tpOptions, "1", doc);
+      const tpDescription = tpHelpText(model);
+      controls.tpHelp.dataset.tooltip = tpDescription;
+      controls.tpHelpDescription.textContent = tpDescription;
+      controls.tpHelp.setAttribute("aria-expanded", "false");
       controls.precision.value = defaultPrecision(model);
       controls.indexerPrecision.value = defaultIndexerPrecision(model);
 
@@ -568,6 +587,20 @@
       syncModel();
     });
     controls.model.addEventListener("change", syncModel);
+    controls.tpHelp.addEventListener("click", function (event) {
+      event.stopPropagation();
+      const expanded = controls.tpHelp.getAttribute("aria-expanded") === "true";
+      controls.tpHelp.setAttribute("aria-expanded", String(!expanded));
+    });
+    controls.tpHelp.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        controls.tpHelp.setAttribute("aria-expanded", "false");
+        controls.tpHelp.blur();
+      }
+    });
+    doc.addEventListener("click", function () {
+      controls.tpHelp.setAttribute("aria-expanded", "false");
+    });
     form.addEventListener("input", function (event) {
       if (event.target !== controls.family && event.target !== controls.model) {
         render();
@@ -590,6 +623,7 @@
     metricRowsForView: metricRowsForView,
     modelsForFamily: modelsForFamily,
     mount: mount,
+    tpHelpText: tpHelpText,
     validTpSizes: validTpSizes
   };
 });

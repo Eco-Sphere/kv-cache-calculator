@@ -226,10 +226,16 @@ select {
 }
 
 .field {
+  position: relative;
   display: grid;
   min-width: 0;
   gap: 5px;
   margin-top: 9px;
+}
+
+.field:hover,
+.field:focus-within {
+  z-index: 3;
 }
 
 .field-group > .field:first-of-type {
@@ -467,10 +473,10 @@ select:focus {
 
 .breakdown-panel {
   margin-top: 10px;
-  overflow: visible;
 }
 
-.formula-panel {
+.detail-panel.formula-panel,
+.detail-panel.breakdown-panel {
   overflow: visible;
 }
 
@@ -518,8 +524,26 @@ select:focus {
   white-space: nowrap;
 }
 
+.formula-list,
+.breakdown {
+  position: relative;
+  z-index: 1;
+}
+
 .formula-list {
   padding: 5px 12px;
+}
+
+.formula-row,
+.breakdown-row {
+  position: relative;
+}
+
+.formula-row:hover,
+.formula-row:focus-within,
+.breakdown-row:hover,
+.breakdown-row:focus-within {
+  z-index: 2;
 }
 
 .formula-row {
@@ -603,16 +627,16 @@ select:focus {
   position: relative;
   display: inline-grid;
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   place-items: center;
-  margin-left: 5px;
+  margin-left: 4px;
   padding: 0;
   border: 1px solid #c9c9c4;
   border-radius: 50%;
   color: var(--muted);
   background: transparent;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1;
   cursor: help;
 }
@@ -622,7 +646,8 @@ select:focus {
   z-index: 10;
   left: 50%;
   bottom: calc(100% + 7px);
-  width: 210px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
   padding: 7px 8px;
   border: 1px solid #cfcfca;
   border-radius: 5px;
@@ -639,6 +664,8 @@ select:focus {
   opacity: 0;
   pointer-events: none;
   text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transform: translate(-50%, 3px);
   transition: opacity 100ms ease, transform 100ms ease;
 }
@@ -648,6 +675,34 @@ select:focus {
 .kv-help[aria-expanded="true"]::after {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+.kv-live-tooltip {
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 7px 8px;
+  border: 1px solid #cfcfca;
+  border-radius: 5px;
+  color: var(--text);
+  background: rgb(255 255 255 / 0.96);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: 0 4px 14px rgb(20 20 18 / 0.12);
+  font-family: Inter, ui-sans-serif, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+html.kv-tooltips-ready .kv-help::after {
+  content: none;
+  display: none;
 }
 
 .source-row {
@@ -839,7 +894,8 @@ select:focus {
   color: var(--muted);
 }
 
-[data-theme="dark"] .kv-help::after {
+[data-theme="dark"] .kv-help::after,
+[data-theme="dark"] .kv-live-tooltip {
   border-color: rgb(225 238 231 / 0.18);
   color: var(--text);
   background: rgb(28 36 32 / 0.96);
@@ -852,7 +908,8 @@ select:focus {
   .control-card,
   .result-card,
   .primary-result,
-  .kv-help::after {
+  .kv-help::after,
+  .kv-live-tooltip {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

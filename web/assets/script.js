@@ -399,8 +399,155 @@
     button.className = "kv-help";
     button.textContent = "?";
     button.setAttribute("aria-label", help);
+    button.setAttribute("aria-expanded", "false");
     button.dataset.tooltip = help;
     label.append(button);
+  }
+
+  function bindHelpTooltips(doc) {
+    if (!doc || !doc.body) {
+      return;
+    }
+    const win = doc.defaultView;
+    if (!win) {
+      return;
+    }
+
+    doc.documentElement.classList.add("kv-tooltips-ready");
+
+    let tip = doc.getElementById("kv-live-tooltip");
+    if (!tip) {
+      tip = doc.createElement("div");
+      tip.id = "kv-live-tooltip";
+      tip.className = "kv-live-tooltip";
+      tip.setAttribute("role", "tooltip");
+      tip.hidden = true;
+      doc.body.appendChild(tip);
+    }
+
+    let active = null;
+    let sticky = false;
+
+    function hide() {
+      if (active) {
+        active.setAttribute("aria-expanded", "false");
+      }
+      active = null;
+      sticky = false;
+      tip.hidden = true;
+    }
+
+    function place() {
+      if (active && !active.isConnected) {
+        hide();
+        return;
+      }
+      if (!active || tip.hidden) {
+        return;
+      }
+      const rect = active.getBoundingClientRect();
+      const gap = 8;
+      const pad = 8;
+      const maxWidth = Math.min(320, win.innerWidth - pad * 2);
+      tip.style.maxWidth = maxWidth + "px";
+      const width = tip.offsetWidth;
+      const height = tip.offsetHeight;
+      let left = rect.left + rect.width / 2 - width / 2;
+      left = Math.min(Math.max(pad, left), win.innerWidth - width - pad);
+      let top = rect.top - height - gap;
+      if (top < pad) {
+        top = rect.bottom + gap;
+        if (top + height > win.innerHeight - pad) {
+          top = Math.max(pad, win.innerHeight - height - pad);
+        }
+      }
+      tip.style.left = Math.round(left) + "px";
+      tip.style.top = Math.round(top) + "px";
+    }
+
+    function show(button, makeSticky) {
+      const text = button.getAttribute("data-tooltip") || button.getAttribute("aria-label") || "";
+      if (!text) {
+        return;
+      }
+      if (active && active !== button) {
+        active.setAttribute("aria-expanded", "false");
+      }
+      active = button;
+      sticky = Boolean(makeSticky);
+      tip.textContent = text;
+      tip.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      place();
+    }
+
+    doc.addEventListener("pointerover", function (event) {
+      const button = event.target.closest && event.target.closest(".kv-help");
+      if (!button || button === active) {
+        return;
+      }
+      show(button, false);
+    });
+    doc.addEventListener("pointerout", function (event) {
+      const button = event.target.closest && event.target.closest(".kv-help");
+      if (!button || sticky || active !== button) {
+        return;
+      }
+      const next = event.relatedTarget;
+      if (next && button.contains(next)) {
+        return;
+      }
+      hide();
+    });
+    doc.addEventListener("focusin", function (event) {
+      const button = event.target.closest && event.target.closest(".kv-help");
+      if (button) {
+        show(button, true);
+      }
+    });
+    doc.addEventListener("focusout", function (event) {
+      const button = event.target.closest && event.target.closest(".kv-help");
+      if (!button || active !== button) {
+        return;
+      }
+      const next = event.relatedTarget;
+      if (next && button.contains(next)) {
+        return;
+      }
+      hide();
+    });
+    doc.addEventListener("click", function (event) {
+      const button = event.target.closest && event.target.closest(".kv-help");
+      if (button) {
+        if (active === button && sticky) {
+          hide();
+        } else {
+          show(button, true);
+        }
+        return;
+      }
+      hide();
+    });
+    doc.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        hide();
+      }
+    });
+    win.addEventListener("scroll", function () {
+      if (active) {
+        place();
+      }
+    }, true);
+    win.addEventListener("resize", function () {
+      if (active) {
+        place();
+      }
+    });
+    doc.addEventListener("kv-help-refresh", function () {
+      if (active && !active.isConnected) {
+        hide();
+      }
+    });
   }
 
   function renderFormula(container, rows, doc) {
@@ -460,6 +607,8 @@
     if (!form) {
       return;
     }
+
+    bindHelpTooltips(doc);
 
     const controls = {
       family: get("family"),
@@ -556,6 +705,9 @@
       } catch (error) {
         get("cache-note").textContent = error.message;
       }
+      if (typeof doc.dispatchEvent === "function") {
+        doc.dispatchEvent(new Event("kv-help-refresh"));
+      }
     }
 
     function syncModel() {
@@ -587,20 +739,6 @@
       syncModel();
     });
     controls.model.addEventListener("change", syncModel);
-    controls.tpHelp.addEventListener("click", function (event) {
-      event.stopPropagation();
-      const expanded = controls.tpHelp.getAttribute("aria-expanded") === "true";
-      controls.tpHelp.setAttribute("aria-expanded", String(!expanded));
-    });
-    controls.tpHelp.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") {
-        controls.tpHelp.setAttribute("aria-expanded", "false");
-        controls.tpHelp.blur();
-      }
-    });
-    doc.addEventListener("click", function () {
-      controls.tpHelp.setAttribute("aria-expanded", "false");
-    });
     form.addEventListener("input", function (event) {
       if (event.target !== controls.family && event.target !== controls.model) {
         render();

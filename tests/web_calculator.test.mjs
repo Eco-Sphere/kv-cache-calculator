@@ -101,6 +101,39 @@ test("DeepSeek V4 defaults to FP8 KV and FP4 Indexer cache", () => {
   assert.equal(result.indexerPrecisionLabel, "FP4 / INT4");
 });
 
+test("DeepSeek V4 replicates latent KV and indexer on every TP device", () => {
+  const item = model("deepseek-v4-pro");
+  const result = app.calculateView(item, inputFor(item, { tensorParallel: 1 }), data);
+  const kv = result.deviceGroups.find((group) => group.role === "kv");
+  const indexer = result.deviceGroups.find((group) => group.role === "indexer");
+  assert.equal(kv.replicated, true);
+  assert.equal(indexer.replicated, true);
+  assert.equal(kv.perDeviceBytes, kv.bytes);
+  assert.equal(indexer.perDeviceBytes, indexer.bytes);
+  assert.equal(result.perDeviceBytes, kv.bytes + indexer.bytes);
+});
+
+test("MLA and DSA latent KV is replicated, MiniMax GQA KV is sharded", () => {
+  const mla = app.calculateView(model("deepseek-v3"), inputFor(model("deepseek-v3"), { tensorParallel: 8 }), data);
+  assert.equal(mla.deviceGroups[0].replicated, true);
+  assert.equal(mla.deviceGroups[0].perDeviceBytes, mla.deviceGroups[0].bytes);
+  assert.equal(mla.allDeviceBytes, mla.perDeviceBytes * 8);
+
+  const dsa = app.calculateView(model("glm-5.1"), inputFor(model("glm-5.1"), { tensorParallel: 8 }), data);
+  const dsaKv = dsa.deviceGroups.find((group) => group.role === "kv");
+  const dsaIndexer = dsa.deviceGroups.find((group) => group.role === "indexer");
+  assert.equal(dsaKv.replicated, true);
+  assert.equal(dsaIndexer.replicated, true);
+  assert.equal(dsa.perDeviceBytes, dsaKv.bytes + dsaIndexer.bytes);
+
+  const msa = app.calculateView(model("minimax-m3"), inputFor(model("minimax-m3"), { tensorParallel: 4 }), data);
+  const msaKv = msa.deviceGroups.find((group) => group.role === "kv");
+  const msaIndexer = msa.deviceGroups.find((group) => group.role === "indexer");
+  assert.equal(msaKv.replicated, false);
+  assert.equal(msaIndexer.replicated, true);
+  assert.equal(msaKv.perDeviceBytes, msaKv.bytes / 4);
+});
+
 test("invalid TP size is rejected", () => {
   const item = model("qwen3.6-27b");
   assert.throws(

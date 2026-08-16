@@ -109,6 +109,10 @@
     return draftLayerCount(model) > 0;
   }
 
+  function isLatentKvFormula(formula) {
+    return formula === "mla" || formula === "dsa_mla" || formula === "deepseek_v4_hybrid";
+  }
+
   function hasLinearState(model) {
     return model.formula === "qwen_linear_full_hybrid";
   }
@@ -164,8 +168,9 @@
       precisionConfig(sourceData)
     );
 
+    const replicateAllCache = isLatentKvFormula(model.formula);
     const deviceGroups = result.cacheGroups.map(function (group) {
-      const replicated = group.role === "indexer";
+      const replicated = replicateAllCache || group.role === "indexer";
       const perDeviceBytes = replicated ? group.bytes : group.bytes / requestedTp;
       return Object.assign({}, group, {
         replicated: replicated,
@@ -238,7 +243,7 @@
         return;
       }
 
-      if ((formula === "standard_gqa" || formula === "mla") && label === "Per-token elements") {
+      if (formula === "standard_gqa" && label === "Per-token elements") {
         rows.push(scaledDetail(
           label,
           value,
@@ -249,9 +254,14 @@
         return;
       }
 
+      if (formula === "mla" && label === "Per-token elements") {
+        rows.push(["Per-device KV elements per token", value, help]);
+        return;
+      }
+
       if (formula === "dsa_mla") {
         if (label === "KV elements per token") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device KV elements per token"));
+          rows.push(["Per-device KV elements per token", value, help]);
           return;
         }
         if (label === "Indexer elements per token") {
@@ -263,7 +273,7 @@
           const indexer = Number(values["Indexer elements per token"]) || 0;
           rows.push([
             "Per-device total elements per token",
-            kv / tp + indexer,
+            kv + indexer,
             help
           ]);
           return;
@@ -314,18 +324,17 @@
       }
 
       if (formula === "deepseek_v4_hybrid") {
-        const shardedLabels = [
-          "Ratio=0 KV elements",
-          "Sliding-window elements",
-          "Compressed elements",
-          "KV elements"
-        ];
-        if (shardedLabels.includes(label)) {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device " + label.toLowerCase()));
-          return;
-        }
         if (label === "Indexer elements") {
           rows.push(["Per-device Indexer elements", value, help]);
+          return;
+        }
+        if (
+          label === "Ratio=0 KV elements" ||
+          label === "Sliding-window elements" ||
+          label === "Compressed elements" ||
+          label === "KV elements"
+        ) {
+          rows.push(["Per-device " + label.toLowerCase(), value, help]);
           return;
         }
       }
@@ -349,17 +358,47 @@
     const hasReplicatedIndexer = view.deviceGroups.some(function (group) {
       return group.replicated;
     });
-    if (hasReplicatedIndexer) {
+    const hasShardedCache = view.deviceGroups.some(function (group) {
+      return !group.replicated;
+    });
+    if (hasReplicatedIndexer && hasShardedCache) {
       rows.push({
         name: "per_device_bytes",
-        expression: "sharded_cache_bytes / TP size + replicated_indexer_bytes",
-        description: "The indexer has one stored key head and is replicated on every TP device."
+        expression: "kv_bytes / TP size + indexer_bytes",
+        description: "kv_bytes is sharded across TP devices. indexer_bytes is copied onto every device because the indexer stores one key head."
       });
       rows.push({
         name: "all_device_bytes",
-        expression: "sharded_cache_bytes + TP size × replicated_indexer_bytes",
-        description: "Physical cache across all devices includes one indexer copy per TP device."
+        expression: "kv_bytes + TP size × indexer_bytes",
+        description: "Sharded kv_bytes is counted once. indexer_bytes is counted once per TP device."
       });
+    } else if (hasReplicatedIndexer) {
+      const hasIndexerGroup = view.deviceGroups.some(function (group) {
+        return group.role === "indexer";
+      });
+      if (hasIndexerGroup) {
+        rows.push({
+          name: "per_device_bytes",
+          expression: "kv_bytes + indexer_bytes",
+          description: "MLA/DSA latent KV is a single vector per layer (num_kv_heads=1). TP shards Q heads only, so every device keeps a full copy of kv_bytes and indexer_bytes."
+        });
+        rows.push({
+          name: "all_device_bytes",
+          expression: "TP size × (kv_bytes + indexer_bytes)",
+          description: "Physical cache across all devices is one full KV+indexer copy per TP rank."
+        });
+      } else {
+        rows.push({
+          name: "per_device_bytes",
+          expression: "total_bytes",
+          description: "MLA latent KV is a single vector per layer (num_kv_heads=1). TP shards Q heads only, so every device keeps a full copy of the KV cache."
+        });
+        rows.push({
+          name: "all_device_bytes",
+          expression: "TP size × total_bytes",
+          description: "Physical cache across all devices is one full latent KV copy per TP rank."
+        });
+      }
     } else {
       rows.push({
         name: "per_device_bytes",
@@ -687,9 +726,17 @@
 
         get("formula-label").textContent = view.elementPlan.formulaLabel;
         renderFormula(get("formula-list"), formulaRowsForView(view), doc);
-        const tpNote = view.deviceGroups.some(function (group) { return group.replicated; })
+        const hasReplicated = view.deviceGroups.some(function (group) {
+          return group.replicated;
+        });
+        const hasSharded = view.deviceGroups.some(function (group) {
+          return !group.replicated;
+        });
+        const tpNote = hasReplicated && hasSharded
           ? " Per-device values shard non-indexer cache across TP and replicate the one-key-head indexer cache on every device."
-          : " Per-device values assume even cache sharding across valid TP devices.";
+          : hasReplicated
+            ? " Per-device values replicate latent KV and indexer cache on every TP device; TP shards Q heads, not KV heads."
+            : " Per-device values assume even cache sharding across valid TP devices.";
         get("cache-note").textContent = view.elementPlan.note + tpNote;
         renderBreakdown(get("breakdown"), detailsForView(view), doc);
 

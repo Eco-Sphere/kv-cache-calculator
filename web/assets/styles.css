@@ -627,16 +627,16 @@ select:focus {
   position: relative;
   display: inline-grid;
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   place-items: center;
-  margin-left: 5px;
+  margin-left: 4px;
   padding: 0;
   border: 1px solid #c9c9c4;
   border-radius: 50%;
   color: var(--muted);
   background: transparent;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1;
   cursor: help;
 }

@@ -400,6 +400,7 @@
     button.textContent = "?";
     button.setAttribute("aria-label", help);
     button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-controls", "kv-live-tooltip");
     button.dataset.tooltip = help;
     label.append(button);
   }
@@ -420,7 +421,7 @@
       tip = doc.createElement("div");
       tip.id = "kv-live-tooltip";
       tip.className = "kv-live-tooltip";
-      tip.setAttribute("role", "tooltip");
+      tip.setAttribute("aria-hidden", "true");
       tip.hidden = true;
       doc.body.appendChild(tip);
     }
@@ -493,10 +494,6 @@
       if (!button || sticky || active !== button) {
         return;
       }
-      const next = event.relatedTarget;
-      if (next && button.contains(next)) {
-        return;
-      }
       hide();
     });
     doc.addEventListener("focusin", function (event) {
@@ -508,10 +505,6 @@
     doc.addEventListener("focusout", function (event) {
       const button = event.target.closest && event.target.closest(".kv-help");
       if (!button || active !== button) {
-        return;
-      }
-      const next = event.relatedTarget;
-      if (next && button.contains(next)) {
         return;
       }
       hide();

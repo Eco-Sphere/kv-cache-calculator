@@ -11,7 +11,7 @@
       document.documentElement.dataset.theme = localStorage.getItem("kv-theme") || "light";
     } catch (_) {}
   </script>
-  <link rel="stylesheet" href="assets/styles.css?v=20260816-1">
+  <link rel="stylesheet" href="assets/styles.css?v=20260816-2">
 </head>
 <body>
   <main class="page-shell">
@@ -65,6 +65,7 @@
                 aria-label="Why are only these TP sizes available?"
                 aria-describedby="tp-help-description"
                 aria-expanded="false"
+                aria-controls="kv-live-tooltip"
                 data-tooltip="TP sizes must divide the model's KV-head count evenly."
               >?</button>
             </span>
@@ -189,8 +190,8 @@
       sync();
     })();
   </script>
-  <script src="assets/models.js?v=20260816-1"></script>
-  <script src="assets/calculator-core.js?v=20260816-1"></script>
-  <script src="assets/script.js?v=20260816-1"></script>
+  <script src="assets/models.js?v=20260719-1"></script>
+  <script src="assets/calculator-core.js?v=20260719-1"></script>
+  <script src="assets/script.js?v=20260816-2"></script>
 </body>
 </html>

@@ -1,0 +1,14 @@
+{
+  "name": "kv-cache-calculator",
+  "version": "1.0.0",
+  "description": "KV cache size calculator: UMD formula engine and model data, reusable as an npm git dependency.",
+  "license": "MIT",
+  "exports": {
+    ".": "./web/assets/calculator-core.js",
+    "./models": "./web/assets/models.js"
+  },
+  "files": [
+    "web/assets/calculator-core.js",
+    "web/assets/models.js"
+  ]
+}

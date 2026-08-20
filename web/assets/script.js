@@ -78,7 +78,8 @@
         : sizes.slice(0, -1).join(", ") + ", or " + sizes[sizes.length - 1];
     const headLabel = kvHeads === 1 ? "KV head" : "KV heads";
     return "This model has " + kvHeads + " " + headLabel + ", so TP size can be " + choices
-      + ", because num_key_value_heads / TP size must be an integer.";
+      + ". Only divisors are shown because num_key_value_heads / TP size must be an integer, "
+      + "giving each device a whole number of KV heads.";
   }
 
   function hasIndexer(model) {
@@ -110,7 +111,39 @@
   }
 
   function hasLinearState(model) {
-    return model.formula === "qwen_linear_full_hybrid";
+    return model.formula === "qwen_linear_full_hybrid"
+      || model.formula === "kimi_linear_hybrid";
+  }
+
+  function hasKdaSpecTokens(model) {
+    return model.formula === "kimi_linear_hybrid";
+  }
+
+  function formatTokenCount(value) {
+    if (value >= 1024 * 1024 && value % (1024 * 1024) === 0) {
+      return value / (1024 * 1024) + "M";
+    }
+    if (value >= 1024 && value % 1024 === 0) {
+      return value / 1024 + "K";
+    }
+    return String(value);
+  }
+
+  function tokenPresets(model) {
+    const max = Math.max(0, Math.floor(Number(model && model.max_position_embeddings) || 0));
+    const presets = [1024, 4096, 16384, 32768, 131072, 262144, 524288, 1048576]
+      .filter(function (value) {
+        return !max || value <= max;
+      });
+    if (max && presets.indexOf(max) === -1) {
+      presets.push(max);
+    }
+    return presets.map(function (value) {
+      return {
+        value: value,
+        label: formatTokenCount(value) + (max && value === max ? " (max)" : "")
+      };
+    });
   }
 
   function defaultPrecision(model) {
@@ -159,13 +192,14 @@
         ),
         includeDraftKvCache: Boolean(input.includeDraftKvCache),
         includeLinearAttentionState: Boolean(input.includeLinearAttentionState),
+        kdaSpecTokens: input.kdaSpecTokens,
         tensorParallel: 1
       },
       precisionConfig(sourceData)
     );
 
     const deviceGroups = result.cacheGroups.map(function (group) {
-      const replicated = group.role === "indexer";
+      const replicated = group.role === "indexer" || group.replicated === true;
       const perDeviceBytes = replicated ? group.bytes : group.bytes / requestedTp;
       return Object.assign({}, group, {
         replicated: replicated,
@@ -291,6 +325,25 @@
         }
       }
 
+      if (formula === "kimi_linear_hybrid") {
+        if (label === "KDA conv elements") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device KDA conv elements"));
+          return;
+        }
+        if (label === "KDA recurrent elements") {
+          rows.push(scaledDetail(label, value, help, tp, "Per-device KDA recurrent elements"));
+          return;
+        }
+        if (label === "Per-token elements") {
+          rows.push([
+            "Per-device KV elements per token",
+            value,
+            help
+          ]);
+          return;
+        }
+      }
+
       if (formula === "mixed_full_sliding_gqa") {
         if (label === "Full-attention elements") {
           rows.push(scaledDetail(label, value, help, tp, "Per-device full-attention elements"));
@@ -338,6 +391,16 @@
     return rows;
   }
 
+  function cacheTermName(label) {
+    return (
+      label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .replace(/_cache$/, "") + "_bytes"
+    );
+  }
+
   function formulaRowsForView(view) {
     const rows = (view.elementPlan.formulaRows || []).map(function (row) {
       return {
@@ -346,19 +409,42 @@
         description: row.description
       };
     });
-    const hasReplicatedIndexer = view.deviceGroups.some(function (group) {
+    const replicatedGroups = view.deviceGroups.filter(function (group) {
       return group.replicated;
     });
-    if (hasReplicatedIndexer) {
+    const shardedGroups = view.deviceGroups.filter(function (group) {
+      return !group.replicated;
+    });
+    if (replicatedGroups.length) {
+      const shardedExpr = shardedGroups.map(function (group) {
+        return cacheTermName(group.label);
+      }).join(" + ");
+      const replicatedExpr = replicatedGroups.map(function (group) {
+        return cacheTermName(group.label);
+      }).join(" + ");
+      const shardedLabels = shardedGroups.map(function (group) {
+        return group.label;
+      }).join(", ");
+      const replicatedLabels = replicatedGroups.map(function (group) {
+        return group.label;
+      }).join(", ");
       rows.push({
         name: "per_device_bytes",
-        expression: "sharded_cache_bytes / TP size + replicated_indexer_bytes",
-        description: "The indexer has one stored key head and is replicated on every TP device."
+        expression: shardedGroups.length
+          ? "(" + shardedExpr + ") / TP size + " + replicatedExpr
+          : replicatedExpr,
+        description:
+          "Sharded caches (" + shardedLabels + ") split their heads evenly across TP devices; "
+          + "replicated caches (" + replicatedLabels + ") keep a full copy on every device."
       });
       rows.push({
         name: "all_device_bytes",
-        expression: "sharded_cache_bytes + TP size × replicated_indexer_bytes",
-        description: "Physical cache across all devices includes one indexer copy per TP device."
+        expression: shardedGroups.length
+          ? shardedExpr + " + TP size × (" + replicatedExpr + ")"
+          : "TP size × (" + replicatedExpr + ")",
+        description:
+          "Physical cache across all devices counts each sharded cache once and one copy of each "
+          + "replicated cache (" + replicatedLabels + ") per TP device."
       });
     } else {
       rows.push({
@@ -607,6 +693,9 @@
       family: get("family"),
       model: get("model"),
       tokens: get("tokens"),
+      tokenCombo: get("token-combo"),
+      tokenComboToggle: get("token-combo-toggle"),
+      tokenOptions: get("token-options"),
       sequences: get("sequences"),
       tensorParallel: get("tensor-parallel"),
       tpHelp: get("tp-help"),
@@ -617,7 +706,9 @@
       draft: get("draft"),
       draftControl: get("draft-control"),
       linear: get("linear"),
-      linearControl: get("linear-control")
+      linearControl: get("linear-control"),
+      specTokens: get("spec-tokens"),
+      specTokensControl: get("spec-tokens-control")
     };
 
     setOptions(
@@ -670,7 +761,8 @@
           precision: controls.precision.value,
           indexerPrecision: controls.indexerPrecision.value,
           includeDraftKvCache: controls.draft.checked,
-          includeLinearAttentionState: controls.linear.checked
+          includeLinearAttentionState: controls.linear.checked,
+          kdaSpecTokens: controls.specTokens ? controls.specTokens.value : 0
         }, sourceData);
 
         get("per-device-gib").textContent = view.perDeviceGiB.toFixed(5) + " GiB";
@@ -687,8 +779,15 @@
 
         get("formula-label").textContent = view.elementPlan.formulaLabel;
         renderFormula(get("formula-list"), formulaRowsForView(view), doc);
-        const tpNote = view.deviceGroups.some(function (group) { return group.replicated; })
-          ? " Per-device values shard non-indexer cache across TP and replicate the one-key-head indexer cache on every device."
+        const replicatedLabels = view.deviceGroups
+          .filter(function (group) { return group.replicated; })
+          .map(function (group) { return group.label; });
+        const shardedLabels = view.deviceGroups
+          .filter(function (group) { return !group.replicated; })
+          .map(function (group) { return group.label; });
+        const tpNote = replicatedLabels.length
+          ? " Per-device values shard " + shardedLabels.join(", ")
+            + " across TP and replicate " + replicatedLabels.join(", ") + " on every device."
           : " Per-device values assume even cache sharding across valid TP devices.";
         get("cache-note").textContent = view.elementPlan.note + tpNote;
         renderBreakdown(get("breakdown"), detailsForView(view), doc);
@@ -708,6 +807,24 @@
       controls.tokens.value = String(model.default_tokens || 1024);
       controls.tokens.max = String(model.max_position_embeddings || "");
 
+      controls.tokenOptions.replaceChildren.apply(
+        controls.tokenOptions,
+        tokenPresets(model).map(function (preset) {
+          const item = doc.createElement("li");
+          item.className = "combo-option";
+          item.setAttribute("role", "option");
+          item.dataset.value = String(preset.value);
+          const label = doc.createElement("span");
+          label.textContent = preset.label;
+          const raw = doc.createElement("span");
+          raw.className = "combo-option-value";
+          raw.textContent = preset.value.toLocaleString();
+          item.append(label, raw);
+          return item;
+        })
+      );
+      closeTokenOptions();
+
       const tpOptions = validTpSizes(model).map(function (tp) {
         return { value: String(tp), label: String(tp) };
       });
@@ -724,6 +841,7 @@
       controls.draft.checked = false;
       controls.linearControl.hidden = !hasLinearState(model);
       controls.linear.checked = hasLinearState(model);
+      controls.specTokensControl.hidden = !hasKdaSpecTokens(model);
       render();
     }
 
@@ -732,6 +850,55 @@
       syncModel();
     });
     controls.model.addEventListener("change", syncModel);
+    function closeTokenOptions() {
+      controls.tokenOptions.hidden = true;
+      controls.tokens.setAttribute("aria-expanded", "false");
+      controls.tokenComboToggle.setAttribute("aria-expanded", "false");
+    }
+
+    function openTokenOptions() {
+      controls.tokenOptions.hidden = false;
+      controls.tokens.setAttribute("aria-expanded", "true");
+      controls.tokenComboToggle.setAttribute("aria-expanded", "true");
+    }
+
+    controls.tokenComboToggle.addEventListener("click", function (event) {
+      event.preventDefault();
+      if (controls.tokenOptions.hidden) {
+        openTokenOptions();
+      } else {
+        closeTokenOptions();
+      }
+    });
+
+    controls.tokenOptions.addEventListener("click", function (event) {
+      const option = event.target.closest
+        ? event.target.closest(".combo-option")
+        : null;
+      if (!option) {
+        return;
+      }
+      controls.tokens.value = option.dataset.value;
+      closeTokenOptions();
+      render();
+    });
+
+    doc.addEventListener("click", function (event) {
+      if (
+        controls.tokenOptions.hidden ||
+        (event.target.closest && event.target.closest("#token-combo"))
+      ) {
+        return;
+      }
+      closeTokenOptions();
+    });
+
+    doc.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closeTokenOptions();
+      }
+    });
+
     form.addEventListener("input", function (event) {
       if (event.target !== controls.family && event.target !== controls.model) {
         render();
@@ -748,12 +915,15 @@
     defaultPrecision: defaultPrecision,
     detailsForView: detailsForView,
     families: families,
+    formulaRowsForView: formulaRowsForView,
     hasDraftCache: hasDraftCache,
     hasIndexer: hasIndexer,
+    hasKdaSpecTokens: hasKdaSpecTokens,
     hasLinearState: hasLinearState,
     metricRowsForView: metricRowsForView,
     modelsForFamily: modelsForFamily,
     mount: mount,
+    tokenPresets: tokenPresets,
     tpHelpText: tpHelpText,
     validTpSizes: validTpSizes
   };

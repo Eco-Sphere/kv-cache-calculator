@@ -17,6 +17,7 @@
   const RESULT_DIGITS = 5;
   const QWEN_LINEAR_CONV_BYTES_PER_ELEMENT = 2;
   const QWEN_LINEAR_RECURRENT_BYTES_PER_ELEMENT = 4;
+  const KIMI_KDA_RECURRENT_BYTES_PER_ELEMENT = 4;
 
   const DEFAULT_PRECISIONS = {
     bf16_fp16: { label: "BF16 / FP16", bytesPerElement: 2 },
@@ -29,6 +30,7 @@
     mla: "MLA latent KV",
     dsa_mla: "DSA/MLA with indexer",
     qwen_linear_full_hybrid: "Qwen linear/full hybrid",
+    kimi_linear_hybrid: "Kimi KDA/MLA hybrid",
     mixed_full_sliding_gqa: "Mixed full/sliding GQA",
     minimax_msa: "MiniMax MSA sparse attention",
     deepseek_v4_hybrid: "DeepSeek V4 hybrid sparse attention",
@@ -97,7 +99,11 @@
   }
 
   function hasLinearAttentionState(model) {
-    return Boolean(model && model.formula === "qwen_linear_full_hybrid");
+    return Boolean(
+      model &&
+        (model.formula === "qwen_linear_full_hybrid" ||
+          model.formula === "kimi_linear_hybrid"),
+    );
   }
 
   function toBoolean(value) {
@@ -445,6 +451,125 @@
       };
     }
 
+    if (formula === "kimi_linear_hybrid") {
+      const layers = getField(model, "num_hidden_layers");
+      const fullLayers = getField(model, "full_attention_layers");
+      const kdaLayers = getField(model, "kda_layers");
+      const kvRank = getField(model, "kv_lora_rank");
+      const ropeDim = getField(model, "qk_rope_head_dim");
+      const kdaHeads = getField(model, "kda_heads");
+      const kdaHeadDim = getField(model, "kda_head_dim");
+      const kdaConvKernel = getField(model, "kda_conv_kernel_size");
+      const specTokens = Math.max(
+        0,
+        Math.floor(Number(settings && settings.kdaSpecTokens) || 0),
+      );
+      // MLA latent cache: one 576-wide latent "head" per full-attention layer,
+      // NoPE rope slot included (kv_lora_rank + qk_rope_head_dim).
+      const elementsPerToken = fullLayers * (kvRank + ropeDim);
+      const kvElements = elementsPerToken * tokens;
+      // KDA state per vLLM kda_state_shape: conv width 3 * heads * head_dim
+      // (q + k + v projections), window kernel-1 plus speculative tokens;
+      // recurrent state is heads x head_dim x head_dim and stays FP32.
+      const kdaConvWidth = 3 * kdaHeads * kdaHeadDim;
+      const kdaConvElements = kdaLayers * kdaConvWidth * (kdaConvKernel - 1 + specTokens);
+      const kdaRecurrentElements = kdaLayers * kdaHeads * kdaHeadDim * kdaHeadDim;
+      const kdaRecurrentBytesPerSequence =
+        kdaRecurrentElements * KIMI_KDA_RECURRENT_BYTES_PER_ELEMENT;
+      // The MLA latent is a single head (num_kv_heads=1 in vLLM's
+      // MLAAttentionSpec), so it is replicated on every TP rank rather than
+      // sharded; the KDA states below shard their heads across TP.
+      const byteGroups = [
+        { role: "kv", label: "MLA KV cache", elements: kvElements, replicated: true },
+      ];
+      const formulaRows = [
+        {
+          name: "mla_kv_bytes",
+          expression:
+            "tokens x sequences x full_attention_layers x (kv_lora_rank + qk_rope_head_dim) x precision_bytes",
+          description:
+            "Only the periodic MLA full-attention layers keep token-linear latent KV; the latent is a single 576-wide head per layer (NoPE rope slot included).",
+        },
+      ];
+
+      if (includeLinearAttentionState) {
+        byteGroups.push(
+          {
+            role: "linear_state",
+            label: "KDA conv state",
+            elements: kdaConvElements,
+          },
+          {
+            role: "linear_state",
+            label: "KDA recurrent state",
+            bytesPerSequence: kdaRecurrentBytesPerSequence,
+          },
+        );
+        formulaRows.push(
+          {
+            name: "kda_conv_state_bytes",
+            expression:
+              "sequences x kda_layers x (3 x kda_heads x kda_head_dim) x (kda_conv_kernel_size - 1 + speculative_tokens) x precision_bytes",
+            description:
+              "Fixed-size Kimi Delta Attention short-conv state per sequence; follows the selected cache precision like vLLM's mamba_cache_dtype=auto.",
+          },
+          {
+            name: "kda_recurrent_state_bytes",
+            expression:
+              "sequences x kda_layers x kda_heads x kda_head_dim x kda_head_dim x 4",
+            description:
+              "Fixed-size KDA recurrent state per sequence, always stored at FP32 in vLLM regardless of cache precision.",
+          },
+          {
+            name: "total_bytes",
+            expression: "mla_kv_bytes + kda_conv_state_bytes + kda_recurrent_state_bytes",
+            description:
+              "Token-linear MLA latent KV plus the constant per-sequence KDA runtime state.",
+          },
+        );
+      } else {
+        formulaRows.push(
+          {
+            name: "kda_state",
+            expression: "excluded unless Include linear-attention state is enabled",
+            description:
+              "KDA layers keep constant-size conv/recurrent state per sequence rather than per-token KV; it is excluded from the token-linear estimate by default.",
+          },
+          {
+            name: "total_bytes",
+            expression: "mla_kv_bytes",
+            description: "Capacity-planning estimate for the token-linear MLA KV payload only.",
+          },
+        );
+      }
+
+      return {
+        elementsPerSequence:
+          kvElements +
+          (includeLinearAttentionState ? kdaConvElements + kdaRecurrentElements : 0),
+        elementsPerToken,
+        formulaLabel: FORMULA_LABELS[formula],
+        formulaText:
+          "mla_kv_bytes = tokens * sequences * full_attention_layers * (kv_lora_rank + qk_rope_head_dim) * precision_bytes\nkda_state_bytes = sequences * kda_layers * (conv_state + recurrent_state_fp32), constant per sequence\ntotal_bytes = mla_kv_bytes + optional_kda_state_bytes",
+        formulaRows,
+        note: includeLinearAttentionState
+          ? "Kimi K3 interleaves KDA linear-attention layers with periodic MLA full-attention layers. KDA state is constant per sequence and does not grow with context, so it dominates short prompts and is amortized away at long context."
+          : "Kimi K3 KDA layers keep constant per-sequence state instead of per-token KV and are excluded by default. Enable the linear-attention state option to add the fixed conv/recurrent state estimate.",
+        byteGroups,
+        components: [
+          ["Main layers", layers],
+          ["MLA full-attention layers", fullLayers, "Periodic MLA layers whose latent KV grows linearly with cached tokens."],
+          ["KDA layers", kdaLayers, "Kimi Delta Attention layers with constant per-sequence state instead of per-token KV."],
+          ["Linear state included", includeLinearAttentionState ? "Yes" : "No", "When enabled, adds the fixed KDA convolution and recurrent state per sequence."],
+          ["Speculative tokens", specTokens, "Extra speculative-decoding tokens widen the KDA conv-state window by one slot each."],
+          ["KDA conv elements", kdaConvElements, "Fixed conv-state scalar elements per sequence: kda_layers x (3 x kda_heads x kda_head_dim) x (kernel - 1 + speculative tokens)."],
+          ["KDA recurrent elements", kdaRecurrentElements, "Fixed recurrent-state scalar elements per sequence, stored at FP32."],
+          ["Per-token elements", elementsPerToken, "MLA latent KV scalar elements per token before multiplying by precision bytes."],
+          ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "kda_layers", "kv_lora_rank", "qk_rope_head_dim", "kda_heads", "kda_head_dim", "kda_conv_kernel_size"])],
+        ],
+      };
+    }
+
     if (formula === "mixed_full_sliding_gqa") {
       const layers = getField(model, "num_hidden_layers");
       const fullLayers = getField(model, "full_attention_layers");
@@ -695,6 +820,7 @@
       role: group.role,
       label: group.label || "KV cache",
       elements: group.elements,
+      replicated: group.replicated === true,
       bytesPerSequence: Number.isFinite(group.bytesPerSequence)
         ? group.bytesPerSequence
         : group.elements * bytesPerElementForGroup(precision, group.role),
@@ -743,6 +869,7 @@
     const elementPlan = calculateElementsPerSequence(model, tokens, {
       includeDraftKvCache: hasDraftKvCache(model) && toBoolean(input.includeDraftKvCache),
       includeLinearAttentionState: hasLinearAttentionState(model) && toBoolean(input.includeLinearAttentionState),
+      kdaSpecTokens: input.kdaSpecTokens,
     });
     const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision);
     const bytesPerSequence = cacheGroupsPerSequence.reduce((total, group) => total + group.bytesPerSequence, 0);
@@ -751,6 +878,7 @@
       role: group.role,
       label: group.label,
       elements: Number.isFinite(group.elements) ? group.elements * sequences : undefined,
+      replicated: group.replicated === true,
       bytes: group.bytesPerSequence * sequences,
     }));
     const kvBytes = cacheGroups

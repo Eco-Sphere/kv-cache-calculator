@@ -24,12 +24,12 @@ function inputFor(item, overrides = {}) {
   };
 }
 
-test("includes all 52 upstream models, nine visible families, and seven formulas", () => {
-  assert.equal(data.models.length, 52);
+test("includes all 53 upstream models, nine visible families, and eight formulas", () => {
+  assert.equal(data.models.length, 53);
   assert.deepEqual(app.families(data.models), [
     "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen",
   ]);
-  assert.equal(new Set(data.models.map((item) => item.formula)).size, 7);
+  assert.equal(new Set(data.models.map((item) => item.formula)).size, 8);
   assert.equal(app.modelsForFamily(data.models, "Qwen").length, 23);
 });
 
@@ -75,6 +75,93 @@ test("Qwen3.6-27B keeps linear-attention state enabled and sharded per device", 
     result.elementPlan.components.find(([label]) => label === "Linear state included")[1],
     "Yes",
   );
+});
+
+test("Kimi K3 combines token-linear MLA KV with constant KDA state", () => {
+  const item = model("kimi-k3");
+  assert.equal(app.hasLinearState(item), true);
+  assert.equal(app.hasKdaSpecTokens(item), true);
+  const result = app.calculateView(item, inputFor(item), data);
+  // MLA latent: 24 full-attention layers x (512 + 64) elements per token.
+  assert.equal(result.elementPlan.elementsPerToken, 24 * 576);
+  // bf16: KV 28311552 + conv 15261696 + recurrent 434110464 bytes per sequence.
+  assert.equal(result.allDeviceBytes, 477683712);
+  const mla = result.deviceGroups.find((group) => group.role === "kv");
+  assert.equal(mla.replicated, true);
+  assert.equal(mla.bytes, 28311552);
+});
+
+test("Kimi K3 replicates MLA latent but shards KDA state across TP", () => {
+  const item = model("kimi-k3");
+  const result = app.calculateView(item, inputFor(item, { tensorParallel: 8 }), data);
+  // Per device: full MLA copy + (conv + recurrent) / 8.
+  assert.equal(result.perDeviceBytes, 28311552 + (15261696 + 434110464) / 8);
+  const kdaGroups = result.deviceGroups.filter((group) => group.role === "linear_state");
+  assert.equal(kdaGroups.length, 2);
+  kdaGroups.forEach((group) => {
+    assert.equal(group.replicated, false);
+  });
+});
+
+test("Kimi K3 speculative tokens widen the KDA conv-state window", () => {
+  const item = model("kimi-k3");
+  const base = app.calculateView(item, inputFor(item), data);
+  const spec = app.calculateView(item, inputFor(item, { kdaSpecTokens: 1 }), data);
+  // One extra slot: 69 layers x (3 x 96 x 128) elements x 2 bytes.
+  assert.equal(spec.allDeviceBytes - base.allDeviceBytes, 69 * 3 * 96 * 128 * 2);
+  assert.equal(spec.allDeviceBytes, 482770944);
+});
+
+test("Kimi K3 excludes KDA state when the linear-attention option is off", () => {
+  const item = model("kimi-k3");
+  const result = app.calculateView(
+    item,
+    inputFor(item, { includeLinearAttentionState: false }),
+    data,
+  );
+  assert.equal(result.allDeviceBytes, 28311552);
+  assert.equal(
+    result.elementPlan.components.find(([label]) => label === "Linear state included")[1],
+    "No",
+  );
+});
+
+test("TP formula rows name the actual sharded and replicated caches", () => {
+  const k3 = app.calculateView(
+    model("kimi-k3"),
+    inputFor(model("kimi-k3"), { tensorParallel: 8 }),
+    data,
+  );
+  const k3PerDevice = app
+    .formulaRowsForView(k3)
+    .find((row) => row.name === "per_device_bytes");
+  assert.equal(
+    k3PerDevice.expression,
+    "(kda_conv_state_bytes + kda_recurrent_state_bytes) / TP size + mla_kv_bytes",
+  );
+  assert.match(k3PerDevice.description, /MLA KV cache/);
+  assert.match(k3PerDevice.description, /KDA conv state, KDA recurrent state/);
+
+  const m3 = app.calculateView(
+    model("minimax-m3"),
+    inputFor(model("minimax-m3"), { tensorParallel: 4 }),
+    data,
+  );
+  const m3PerDevice = app
+    .formulaRowsForView(m3)
+    .find((row) => row.name === "per_device_bytes");
+  assert.equal(m3PerDevice.expression, "(kv_bytes) / TP size + indexer_bytes");
+});
+
+test("token presets include 128K and the model's maximum context", () => {
+  const k3 = app.tokenPresets(model("kimi-k3"));
+  assert.deepEqual(
+    k3.filter((preset) => preset.value === 131072).map((preset) => preset.label),
+    ["128K"],
+  );
+  assert.deepEqual(k3[k3.length - 1], { value: 1048576, label: "1M (max)" });
+  const small = app.tokenPresets(model("qwen3.6-27b"));
+  assert.ok(small.every((preset) => preset.value <= 262144));
 });
 
 test("standard GQA result matches the upstream Qwen3-32B golden value", () => {

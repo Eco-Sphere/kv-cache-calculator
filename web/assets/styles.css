@@ -294,6 +294,91 @@ select {
   padding-right: 28px;
 }
 
+.combo {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.combo input {
+  padding-right: 30px;
+}
+
+.combo-toggle {
+  position: absolute;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.combo-toggle:hover {
+  color: var(--text);
+  background: rgb(62 79 69 / 0.08);
+}
+
+.combo-toggle svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.combo-options {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 238px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-strong);
+  box-shadow: 0 12px 32px rgb(38 59 49 / 0.16);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  font-size: 13px;
+}
+
+.combo-options[hidden] {
+  display: none;
+}
+
+.combo-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.combo-option:hover {
+  background: rgb(37 95 75 / 0.09);
+}
+
+.combo-option-value {
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+}
+
 input:hover,
 select:hover {
   border-color: #bdbdb8;

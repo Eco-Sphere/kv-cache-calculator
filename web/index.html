@@ -11,7 +11,7 @@
       document.documentElement.dataset.theme = localStorage.getItem("kv-theme") || "light";
     } catch (_) {}
   </script>
-  <link rel="stylesheet" href="assets/styles.css?v=20260816-3">
+  <link rel="stylesheet" href="assets/styles.css?v=20260820-1">
 </head>
 <body>
   <main class="page-shell">
@@ -49,11 +49,21 @@
         <div class="field-group field-grid">
           <label class="field">
             <span>Tokens per sequence</span>
-            <input id="tokens" type="number" min="1" step="1" value="1024" inputmode="numeric">
+            <div class="combo" id="token-combo">
+              <input id="tokens" type="number" min="1" step="1" value="1024" inputmode="numeric" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="token-options">
+              <button class="combo-toggle" id="token-combo-toggle" type="button" tabindex="-1" aria-label="Show typical context lengths" aria-expanded="false" aria-controls="token-options">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+              </button>
+              <ul class="combo-options" id="token-options" role="listbox" aria-label="Typical context lengths" hidden></ul>
+            </div>
           </label>
           <label class="field">
             <span>Sequences</span>
             <input id="sequences" type="number" min="1" step="1" value="1" inputmode="numeric">
+          </label>
+          <label class="field" id="spec-tokens-control" hidden>
+            <span>Speculative tokens</span>
+            <input id="spec-tokens" type="number" min="0" step="1" value="0" inputmode="numeric">
           </label>
           <div class="field">
             <span class="field-label">
@@ -190,8 +200,8 @@
       sync();
     })();
   </script>
-  <script src="assets/models.js?v=20260719-1"></script>
-  <script src="assets/calculator-core.js?v=20260719-1"></script>
-  <script src="assets/script.js?v=20260816-2"></script>
+  <script src="assets/models.js?v=20260820-1"></script>
+  <script src="assets/calculator-core.js?v=20260820-1"></script>
+  <script src="assets/script.js?v=20260820-1"></script>
 </body>
 </html>

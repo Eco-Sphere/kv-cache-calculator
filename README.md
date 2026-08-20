@@ -10,13 +10,13 @@
 python3 -m http.server 8000 --directory web
 ```
 
-然后访问 `http://localhost:8000`。网页内置 9 个模型家族、52 个模型，并支持 TP、KV/Indexer 精度、Draft KV 和 Qwen Linear Attention runtime state 等模型相关选项。
+然后访问 `http://localhost:8000`。网页内置 9 个模型家族、53 个模型，并支持 TP、KV/Indexer 精度、Draft KV、Linear Attention runtime state 和 Speculative tokens 等模型相关选项。
 
 ### 网页支持范围
 
 - DeepSeek：V4 Pro、V4 Flash、V3.2、V3、R1
 - GLM：GLM-5、GLM-5.1、GLM-5.2
-- Kimi：K2.5、K2.6
+- Kimi：K2.5、K2.6、K3
 - Qwen：Qwen3.6、Qwen3.5、Qwen3、Qwen2.5 共 23 个模型
 - Llama：Llama 3.1 8B/70B、Llama 3.3 70B
 - Gemma：Gemma 4 E2B、E4B、26B-A4B、31B
@@ -24,7 +24,7 @@ python3 -m http.server 8000 --directory web
 - MiMo：MiMo-V2.5、MiMo-V2.5-Pro
 - MiniMax：M2、M2.1、M2.5、M2.7、M3
 
-网页覆盖 Standard MHA/GQA、MLA、DSA/MLA + Indexer、Qwen Linear/Full Hybrid、Full/Sliding GQA、MiniMax MSA 和 DeepSeek V4 Hybrid 七套容量公式。模型数据和公式来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+网页覆盖 Standard MHA/GQA、MLA、DSA/MLA + Indexer、Qwen Linear/Full Hybrid、Kimi KDA/MLA Hybrid、Full/Sliding GQA、MiniMax MSA 和 DeepSeek V4 Hybrid 八套容量公式。模型数据和公式来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 Python CLI 根据 HuggingFace 风格的 `config.json` **估算 decoder KV cache 占用字节数**，用于容量规划或和实测对照。CLI 支持以下两类结构，由配置自动分流。
 

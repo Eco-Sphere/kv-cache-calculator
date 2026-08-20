@@ -357,6 +357,27 @@
     },
     {
       "default_tokens": 1024,
+      "family": "Kimi",
+      "fields": {
+        "full_attention_layers": 24,
+        "kda_conv_kernel_size": 4,
+        "kda_head_dim": 128,
+        "kda_heads": 96,
+        "kda_layers": 69,
+        "kv_lora_rank": 512,
+        "num_hidden_layers": 93,
+        "num_key_value_heads": 96,
+        "qk_rope_head_dim": 64
+      },
+      "formula": "kimi_linear_hybrid",
+      "id": "kimi-k3",
+      "label": "Kimi K3",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-08-20",
+      "source_url": "https://huggingface.co/moonshotai/Kimi-K3/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
       "family": "Qwen3.6",
       "fields": {
         "full_attention_layers": 16,

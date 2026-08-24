@@ -751,17 +751,17 @@
         elementsPerToken: elementsPerSequence / tokens,
         formulaLabel: FORMULA_LABELS[formula],
         formulaText:
-          "sliding_kv_bytes = active_layers * sliding_window * head_dim * kv_precision_bytes\ncompressed_kv_bytes = sum_ratio>0(floor(tokens / compress_ratio) * head_dim) * kv_precision_bytes\nkv_bytes = sliding_kv_bytes + compressed_kv_bytes\nindexer_bytes = ratio4_layers * floor(tokens / 4) * index_head_dim * indexer_precision_bytes\ntotal_bytes = sequences * (kv_bytes + indexer_bytes)",
+          "sliding_kv_bytes = sequences * active_layers * sliding_window * head_dim * kv_precision_bytes\ncompressed_kv_bytes = sequences * sum_ratio>0(floor(tokens / compress_ratio) * head_dim) * kv_precision_bytes\nkv_bytes = sliding_kv_bytes + compressed_kv_bytes\nindexer_bytes = sequences * ratio4_layers * floor(tokens / 4) * index_head_dim * indexer_precision_bytes\ntotal_bytes = kv_bytes + indexer_bytes",
         formulaRows: [
           {
             name: "sliding_kv_bytes",
-            expression: "active_layers x sliding_window x head_dim x kv_precision_bytes",
-            description: "Includes ratio=0 layers. Ratio=0 layers only contribute this fixed sliding-window KV and do not add compressed KV slots.",
+            expression: "sequences x active_layers x sliding_window x head_dim x kv_precision_bytes",
+            description: "Sliding-window KV for all sequences. Includes ratio=0 layers, which do not add compressed KV slots.",
           },
           {
             name: "compressed_kv_bytes",
-            expression: "sum over ratio>0 layers: floor(tokens / compress_ratio) x head_dim x kv_precision_bytes",
-            description: "Compressed KV cache from layers whose compress_ratio is greater than zero; each layer keeps floor(tokens / compress_ratio) compressed slots.",
+            expression: "sequences x sum over ratio>0 layers: floor(tokens / compress_ratio) x head_dim x kv_precision_bytes",
+            description: "Compressed KV for all sequences from layers whose compress_ratio is greater than zero; each layer keeps floor(tokens / compress_ratio) compressed slots per sequence.",
           },
           {
             name: "kv_bytes",
@@ -771,12 +771,12 @@
           {
             name: "indexer_bytes",
             expression:
-              "ratio4_layers x floor(tokens / 4) x index_head_dim x indexer_precision_bytes",
-            description: "Ratio=4 layers keep an extra compressed indexer cache that can use a separate precision.",
+              "sequences x ratio4_layers x floor(tokens / 4) x index_head_dim x indexer_precision_bytes",
+            description: "Indexer key cache for all sequences. Ratio=4 layers keep this extra compressed cache, which can use a separate precision.",
           },
           {
             name: "total_bytes",
-            expression: "sequences x (kv_bytes + indexer_bytes)",
+            expression: "kv_bytes + indexer_bytes",
             description: "Combined DeepSeek V4 cache payload for all concurrent sequences.",
           },
         ],

@@ -150,7 +150,32 @@ test("TP formula rows name the actual sharded and replicated caches", () => {
   const m3PerDevice = app
     .formulaRowsForView(m3)
     .find((row) => row.name === "per_device_bytes");
-  assert.equal(m3PerDevice.expression, "(kv_bytes) / TP size + indexer_bytes");
+  assert.equal(m3PerDevice.expression, "kv_bytes / TP size + indexer_bytes");
+
+  const v4 = app.calculateView(
+    model("deepseek-v4-pro"),
+    inputFor(model("deepseek-v4-pro"), { tensorParallel: 1 }),
+    data,
+  );
+  const v4Rows = app.formulaRowsForView(v4);
+  assert.equal(v4Rows.some((row) => row.name === "sharded_cache_bytes"), false);
+  assert.equal(v4Rows.some((row) => row.name === "replicated_indexer_bytes"), false);
+  assert.match(
+    v4Rows.find((row) => row.name === "sliding_kv_bytes").expression,
+    /^sequences x /,
+  );
+  assert.match(
+    v4Rows.find((row) => row.name === "compressed_kv_bytes").expression,
+    /^sequences x /,
+  );
+  assert.match(
+    v4Rows.find((row) => row.name === "indexer_bytes").expression,
+    /^sequences x /,
+  );
+  assert.equal(
+    v4Rows.find((row) => row.name === "per_device_bytes").expression,
+    "kv_bytes / TP size + indexer_bytes",
+  );
 });
 
 test("token presets include 128K and the model's maximum context", () => {

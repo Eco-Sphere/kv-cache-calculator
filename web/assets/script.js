@@ -431,7 +431,8 @@
       rows.push({
         name: "per_device_bytes",
         expression: shardedGroups.length
-          ? "(" + shardedExpr + ") / TP size + " + replicatedExpr
+          ? (shardedGroups.length > 1 ? "(" + shardedExpr + ")" : shardedExpr)
+            + " / TP size + " + replicatedExpr
           : replicatedExpr,
         description:
           "Sharded caches (" + shardedLabels + ") split their heads evenly across TP devices; "

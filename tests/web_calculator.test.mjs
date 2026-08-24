@@ -24,13 +24,13 @@ function inputFor(item, overrides = {}) {
   };
 }
 
-test("includes all 53 upstream models, nine visible families, and eight formulas", () => {
-  assert.equal(data.models.length, 53);
+test("includes all 54 upstream models, nine visible families, and eight formulas", () => {
+  assert.equal(data.models.length, 54);
   assert.deepEqual(app.families(data.models), [
     "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen",
   ]);
   assert.equal(new Set(data.models.map((item) => item.formula)).size, 8);
-  assert.equal(app.modelsForFamily(data.models, "Qwen").length, 23);
+  assert.equal(app.modelsForFamily(data.models, "Qwen").length, 24);
 });
 
 test("every model calculates finite values at every supported TP size", () => {
@@ -75,6 +75,63 @@ test("Qwen3.6-27B keeps linear-attention state enabled and sharded per device", 
     result.elementPlan.components.find(([label]) => label === "Linear state included")[1],
     "Yes",
   );
+});
+
+test("Qwen3.8-27B matches the Qwen3.6-27B hybrid layout", () => {
+  const item = model("qwen3.8-27b");
+  const baseline = app.calculateView(model("qwen3.6-27b"), inputFor(model("qwen3.6-27b"), { tensorParallel: 4 }), data);
+  const result = app.calculateView(item, inputFor(item, { tensorParallel: 4 }), data);
+  assert.equal(result.perDeviceBytes, baseline.perDeviceBytes);
+  assert.equal(result.allDeviceBytes, baseline.allDeviceBytes);
+  assert.equal(result.elementPlan.formulaLabel, "Qwen linear/full hybrid");
+});
+
+test("Qwen3.8-27B links the DFlash2 speculative draft model", () => {
+  const item = model("qwen3.8-27b");
+  const specModels = app.speculativeModelsFor(data, item);
+  assert.equal(specModels.length, 1);
+  assert.equal(specModels[0].id, "qwen3.8-27b-dflash2");
+  assert.equal(specModels[0].source_url, "https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2/raw/main/config.json");
+  assert.deepEqual(specModels[0].target_model_ids, ["qwen3.8-27b"]);
+});
+
+test("DFlash2 speculative draft adds sliding-window KV on top of the target model", () => {
+  const item = model("qwen3.8-27b");
+  const draft = app.speculativeModelsFor(data, item)[0];
+  const base = app.calculateView(item, inputFor(item), data);
+  const withDraft = app.calculateView(item, inputFor(item, { speculativeModel: draft }), data);
+  // 5 sliding layers x 2 x 8 kv heads x 128 head dim x 1024 tokens x 2 bytes.
+  assert.equal(withDraft.allDeviceBytes - base.allDeviceBytes, 5 * 2 * 8 * 128 * 1024 * 2);
+  const group = withDraft.deviceGroups.find((entry) => entry.label === "Draft Sliding-window KV cache");
+  assert.ok(group);
+  assert.equal(group.bytes, 20971520);
+  assert.equal(withDraft.elementPlan.speculative.label, "z-lab/Qwen3.8-27B-DFlash2");
+  assert.equal(withDraft.elementPlan.speculative.href, "https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2");
+  // Main model details stay separate from the speculative model's own section.
+  assert.ok(!withDraft.elementPlan.components.some(([label]) => label === "Speculative model"));
+  assert.ok(!withDraft.elementPlan.components.some(([label]) => label.startsWith("Draft ")));
+});
+
+test("DFlash2 draft cache is capped by its 2048-token sliding window", () => {
+  const item = model("qwen3.8-27b");
+  const draft = app.speculativeModelsFor(data, item)[0];
+  const base = app.calculateView(item, inputFor(item, { tokens: 4096 }), data);
+  const withDraft = app.calculateView(item, inputFor(item, { tokens: 4096, speculativeModel: draft }), data);
+  // min(4096, 2048) retained tokens: 5 x 2 x 8 x 128 x 2048 x 2 bytes.
+  assert.equal(withDraft.allDeviceBytes - base.allDeviceBytes, 5 * 2 * 8 * 128 * 2048 * 2);
+});
+
+test("DFlash2 draft KV shards across valid TP sizes", () => {
+  const item = model("qwen3.8-27b");
+  const draft = app.speculativeModelsFor(data, item)[0];
+  const result = app.calculateView(item, inputFor(item, { tensorParallel: 4, speculativeModel: draft }), data);
+  const group = result.deviceGroups.find((entry) => entry.label === "Draft Sliding-window KV cache");
+  assert.equal(group.replicated, false);
+  assert.equal(group.perDeviceBytes, group.bytes / 4);
+  const section = app.draftDetailsForView(result);
+  assert.equal(section.label, "z-lab/Qwen3.8-27B-DFlash2");
+  const perToken = section.rows.find(([label]) => label === "Per-device KV elements per token");
+  assert.equal(perToken[1], 5 * 2 * 8 * 128 / 4);
 });
 
 test("Kimi K3 combines token-linear MLA KV with constant KDA state", () => {

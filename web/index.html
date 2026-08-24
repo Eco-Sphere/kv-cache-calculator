@@ -11,7 +11,7 @@
       document.documentElement.dataset.theme = localStorage.getItem("kv-theme") || "light";
     } catch (_) {}
   </script>
-  <link rel="stylesheet" href="assets/styles.css?v=20260820-1">
+  <link rel="stylesheet" href="assets/styles.css?v=20260824-4">
 </head>
 <body>
   <main class="page-shell">
@@ -60,6 +60,10 @@
           <label class="field">
             <span>Sequences</span>
             <input id="sequences" type="number" min="1" step="1" value="1" inputmode="numeric">
+          </label>
+          <label class="field field-wide" id="spec-model-control" hidden>
+            <span>Speculative model</span>
+            <select id="spec-model"></select>
           </label>
           <label class="field" id="spec-tokens-control" hidden>
             <span>Speculative tokens</span>
@@ -177,6 +181,17 @@
             </a>
           </footer>
         </section>
+
+        <section class="detail-panel breakdown-panel" id="draft-panel" hidden>
+          <div class="panel-heading">
+            <span>Draft model details</span>
+            <a id="draft-link" href="#" target="_blank" rel="noopener">
+              <span id="draft-name"></span>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3 5 11M11 9v4H3V5h4"/></svg>
+            </a>
+          </div>
+          <div class="breakdown" id="draft-breakdown"></div>
+        </section>
       </section>
     </section>
   </main>
@@ -200,8 +215,8 @@
       sync();
     })();
   </script>
-  <script src="assets/models.js?v=20260820-1"></script>
-  <script src="assets/calculator-core.js?v=20260820-1"></script>
-  <script src="assets/script.js?v=20260820-1"></script>
+  <script src="assets/models.js?v=20260824-4"></script>
+  <script src="assets/calculator-core.js?v=20260824-4"></script>
+  <script src="assets/script.js?v=20260824-4"></script>
 </body>
 </html>

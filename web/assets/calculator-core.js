@@ -32,6 +32,7 @@
     qwen_linear_full_hybrid: "Qwen linear/full hybrid",
     kimi_linear_hybrid: "Kimi KDA/MLA hybrid",
     mixed_full_sliding_gqa: "Mixed full/sliding GQA",
+    sliding_gqa: "Sliding-window GQA",
     minimax_msa: "MiniMax MSA sparse attention",
     deepseek_v4_hybrid: "DeepSeek V4 hybrid sparse attention",
   };
@@ -434,8 +435,8 @@
           "full_kv_bytes = tokens * sequences * full_attention_layers * 2 * num_key_value_heads * head_dim * precision_bytes\ntotal_bytes = full_kv_bytes + optional_linear_attention_state_bytes",
         formulaRows,
         note: includeLinearAttentionState
-          ? "Qwen3.5/3.6 linear-attention state is sequence-level runtime state, not per-token KV. It does not grow linearly with tokens, so it matters more for short prompts and is diluted by full-attention KV at long context."
-          : "Qwen3.5/3.6 linear-attention recurrent/conv state is not ordinary per-token KV and is excluded by default. Enable the linear-attention state option to add a fixed runtime-state estimate.",
+          ? "Qwen linear-attention state is sequence-level runtime state, not per-token KV. It does not grow linearly with tokens, so it matters more for short prompts and is diluted by full-attention KV at long context."
+          : "Qwen linear-attention recurrent/conv state is not ordinary per-token KV and is excluded by default. Enable the linear-attention state option to add a fixed runtime-state estimate.",
         byteGroups,
         components: [
           ["Main layers", layers],
@@ -444,7 +445,7 @@
           ["Linear state included", includeLinearAttentionState ? "Yes" : "No", "When enabled, adds fixed convolution and recurrent state for Qwen linear-attention layers."],
           ["Linear conv elements", linearConvElements, "Fixed convolution-state scalar elements per sequence before applying the 2-byte estimate."],
           ["Linear recurrent elements", linearRecurrentElements, "Fixed recurrent-state scalar elements per sequence before applying the 4-byte estimate."],
-          ["MTP layers not included", mtpLayers, "Qwen3.5/3.6 configs expose MTP layers, but the cache shape is not explicit enough to include defensibly."],
+          ["MTP layers not included", mtpLayers, "Qwen3.5/3.6/3.8 configs expose MTP layers, but the cache shape is not explicit enough to include defensibly."],
           ["Per-token elements", elementsPerToken, "Ordinary full-attention KV scalar elements per token before multiplying by precision bytes."],
           ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "linear_attention_layers", "num_key_value_heads", "head_dim", "linear_num_key_heads", "linear_key_head_dim", "linear_num_value_heads", "linear_value_head_dim", "linear_conv_kernel_dim"])],
         ],
@@ -646,6 +647,43 @@
       };
     }
 
+    if (formula === "sliding_gqa") {
+      const layers = getField(model, "num_hidden_layers");
+      const kvHeads = getField(model, "num_key_value_heads");
+      const headDim = getField(model, "head_dim");
+      const slidingWindow = getField(model, "sliding_window");
+      const retainedTokens = Math.min(tokens, slidingWindow);
+      const elements = retainedTokens * layers * 2 * kvHeads * headDim;
+      return {
+        elementsPerSequence: elements,
+        elementsPerToken: elements / tokens,
+        formulaLabel: FORMULA_LABELS[formula],
+        formulaText:
+          "sliding_kv_bytes = min(tokens, sliding_window) * sequences * layers * 2 * num_key_value_heads * head_dim * precision_bytes",
+        formulaRows: [
+          {
+            name: "sliding_kv_bytes",
+            expression: "min(tokens, sliding_window) x sequences x layers x 2 x num_key_value_heads x head_dim x precision_bytes",
+            description: "Sliding-window-only attention retains at most sliding_window tokens of KV per sequence.",
+          },
+          {
+            name: "total_bytes",
+            expression: "sliding_kv_bytes",
+            description: "Every layer uses sliding-window attention, so the window-capped KV payload is the whole cache.",
+          },
+        ],
+        note: "Production estimate for a sliding-window-only attention model; each layer retains at most sliding_window tokens of KV per sequence.",
+        byteGroups: [{ role: "kv", label: "Sliding-window KV cache", elements }],
+        components: [
+          ["Main layers", layers],
+          ["Sliding window", slidingWindow, "Per-layer KV retention cap in tokens."],
+          ["Retained sliding tokens", retainedTokens, "min(tokens, sliding_window) for each attention layer."],
+          ["Per-token elements", layers * 2 * kvHeads * headDim, "Scalar KV elements per retained token before multiplying by precision bytes."],
+          ["Model fields", fieldList(model, ["num_hidden_layers", "num_key_value_heads", "head_dim", "sliding_window"])],
+        ],
+      };
+    }
+
     if (formula === "minimax_msa") {
       const layers = getField(model, "num_hidden_layers");
       const fullLayers = getField(model, "full_attention_layers");
@@ -803,6 +841,50 @@
     throw new Error(`Unsupported formula: ${formula}`);
   }
 
+  function mergeSpeculativeDraft(elementPlan, draftModel, tokens) {
+    const draftPlan = calculateElementsPerSequence(draftModel, tokens, {
+      includeDraftKvCache: false,
+      includeLinearAttentionState: false,
+    });
+    const draftLabel = (draftModel && (draftModel.repo_id || draftModel.label || draftModel.id)) || "speculative draft";
+    const draftHref =
+      draftModel && typeof draftModel.source_url === "string"
+        ? draftModel.source_url.replace(/\/raw\/[^/]+\/.*$/, "")
+        : undefined;
+    const draftGroups = (draftPlan.byteGroups || []).map((group) => ({
+      ...group,
+      label: `Draft ${group.label || "KV cache"}`,
+    }));
+    const draftNames = (draftPlan.formulaRows || []).map((row) => row.name);
+    const draftRows = (draftPlan.formulaRows || []).map((row) => {
+      let expression = row.expression;
+      draftNames.forEach((name) => {
+        expression = expression.replace(new RegExp(`\\b${name}\\b`, "g"), `draft_${name}`);
+      });
+      return {
+        name: `draft_${row.name}`,
+        expression,
+        description: `[${draftLabel}] ${row.description || ""}`.trim(),
+      };
+    });
+    return {
+      ...elementPlan,
+      elementsPerSequence: elementPlan.elementsPerSequence + draftPlan.elementsPerSequence,
+      elementsPerToken: elementPlan.elementsPerToken + draftPlan.elementsPerToken,
+      formulaLabel: `${elementPlan.formulaLabel} + speculative draft`,
+      formulaRows: (elementPlan.formulaRows || []).concat(draftRows),
+      note: `${elementPlan.note} Speculative draft cache for ${draftLabel} is included.`,
+      byteGroups: (elementPlan.byteGroups || []).concat(draftGroups),
+      components: elementPlan.components,
+      speculative: {
+        label: draftLabel,
+        href: draftHref,
+        description: "Speculative decoding draft model whose KV cache is added on top of the target model.",
+        components: draftPlan.components,
+      },
+    };
+  }
+
   function bytesPerElementForGroup(precision, role) {
     if ((role === "kv" || role === "attention") && Number.isFinite(precision.kvBytesPerElement)) {
       return precision.kvBytesPerElement;
@@ -866,11 +948,14 @@
           indexerBytesPerElement: indexerPrecision.bytesPerElement,
         }
       : precision;
-    const elementPlan = calculateElementsPerSequence(model, tokens, {
+    let elementPlan = calculateElementsPerSequence(model, tokens, {
       includeDraftKvCache: hasDraftKvCache(model) && toBoolean(input.includeDraftKvCache),
       includeLinearAttentionState: hasLinearAttentionState(model) && toBoolean(input.includeLinearAttentionState),
       kdaSpecTokens: input.kdaSpecTokens,
     });
+    if (input.speculativeModel) {
+      elementPlan = mergeSpeculativeDraft(elementPlan, input.speculativeModel, tokens);
+    }
     const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision);
     const bytesPerSequence = cacheGroupsPerSequence.reduce((total, group) => total + group.bytesPerSequence, 0);
     const totalBytes = bytesPerSequence * sequences;

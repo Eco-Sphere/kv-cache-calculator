@@ -30,6 +30,10 @@ python3 -m http.server 8000 --directory web
 
 - 静态网页全部 52 个模型和 TP 规则：`node --test tests/web_calculator.test.mjs`
 
+## 反馈
+
+如果你发现模型参数、计算假设或结果存在问题，欢迎提交 [Issue](https://github.com/Eco-Sphere/kv-cache-calculator/issues/new)。请附上模型与输入配置、预期结果、实际结果和可验证的数据来源。
+
 ## 仓库布局
 
 ```

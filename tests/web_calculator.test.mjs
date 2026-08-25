@@ -114,7 +114,7 @@ test("TP help explains why only KV-head divisors are available", () => {
   assert.deepEqual(app.validTpSizes(item), [1, 2, 4]);
   assert.equal(
     app.tpHelpText(item),
-    "This model has 4 KV heads, so TP size can be 1, 2, or 4. Only divisors are shown because num_key_value_heads / TP size must be an integer, giving each device a whole number of KV heads.",
+    "This model has 4 KV heads, so TP size can be 1, 2, or 4, because num_key_value_heads / TP size must be an integer.",
   );
 });
 

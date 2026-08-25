@@ -796,9 +796,13 @@
       const selected = speculativeModelsFor(sourceData, model).find(function (item) {
         return item.id === controls.specModel.value;
       });
-      // Default N to the draft block size; N drives the target model GDN state growth.
+      // N drives the target model GDN state growth; use the serving default when provided.
       controls.specTokens.value = selected
-        ? String(numericField(selected, "dflash_block_size", 1))
+        ? String(numericField(
+          selected,
+          "default_speculative_tokens",
+          numericField(selected, "dflash_block_size", 1)
+        ))
         : "0";
       render();
     });

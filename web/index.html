@@ -63,14 +63,6 @@
             <span>Sequences</span>
             <input id="sequences" type="number" min="1" step="1" value="1" inputmode="numeric">
           </label>
-          <label class="field field-wide" id="spec-model-control" hidden>
-            <span>Speculative model</span>
-            <select id="spec-model"></select>
-          </label>
-          <label class="field" id="spec-tokens-control" hidden>
-            <span>Speculative tokens</span>
-            <input id="spec-tokens" type="number" min="0" step="1" value="0" inputmode="numeric">
-          </label>
           <div class="field">
             <span class="field-label">
               <label for="tensor-parallel">TP size</label>
@@ -105,6 +97,14 @@
               <option value="fp8_int8">FP8 / INT8</option>
               <option value="fp4_int4">FP4 / INT4</option>
             </select>
+          </label>
+          <label class="field" id="spec-model-control" hidden>
+            <span>Speculative model</span>
+            <select id="spec-model"></select>
+          </label>
+          <label class="field" id="spec-tokens-control" hidden>
+            <span>Speculative tokens</span>
+            <input id="spec-tokens" type="number" min="0" step="1" value="0" inputmode="numeric">
           </label>
         </div>
 

@@ -1259,6 +1259,7 @@
       "default_tokens": 1024,
       "family": "Qwen3.8",
       "fields": {
+        "default_speculative_tokens": 7,
         "dflash_block_size": 8,
         "head_dim": 128,
         "num_attention_heads": 32,

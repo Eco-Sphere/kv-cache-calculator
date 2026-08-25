@@ -92,6 +92,8 @@ test("Qwen3.8-27B links the DFlash2 speculative draft model", () => {
   assert.equal(specModels.length, 1);
   assert.equal(specModels[0].id, "qwen3.8-27b-dflash2");
   assert.equal(specModels[0].repo_id, "z-lab/Qwen3.8-27B-DFlash2");
+  assert.equal(specModels[0].fields.default_speculative_tokens, 7);
+  assert.equal(specModels[0].fields.dflash_block_size, 8);
   assert.deepEqual(specModels[0].target_model_ids, ["qwen3.8-27b"]);
 });
 

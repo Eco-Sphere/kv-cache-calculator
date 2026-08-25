@@ -113,6 +113,18 @@
     return model.formula === "qwen_linear_full_hybrid";
   }
 
+  function speculativeModelsFor(data, model) {
+    const ids = (model && model.speculative_model_ids) || [];
+    const pool = (data && data.speculative_models) || [];
+    return ids
+      .map(function (id) {
+        return pool.find(function (item) {
+          return item.id === id;
+        });
+      })
+      .filter(Boolean);
+  }
+
   function defaultPrecision(model) {
     return model.formula === "deepseek_v4_hybrid" ? "fp8_int8" : "bf16_fp16";
   }
@@ -146,6 +158,16 @@
         "TP size " + requestedTp + " is invalid because num_key_value_heads / TP must be an integer."
       );
     }
+    const specModel = input.speculativeModel || null;
+    if (specModel) {
+      const draftKvHeads = Math.max(1, Math.floor(numericField(specModel, "num_key_value_heads", 1)));
+      if (draftKvHeads % requestedTp !== 0) {
+        throw new RangeError(
+          "TP size " + requestedTp + " is invalid for speculative model " + specModel.label
+            + " because its num_key_value_heads / TP must be an integer."
+        );
+      }
+    }
 
     const result = Core.calculate(
       modelForCalculation(model),
@@ -159,6 +181,8 @@
         ),
         includeDraftKvCache: Boolean(input.includeDraftKvCache),
         includeLinearAttentionState: Boolean(input.includeLinearAttentionState),
+        specTokens: input.specTokens,
+        speculativeModel: specModel,
         tensorParallel: 1
       },
       precisionConfig(sourceData)
@@ -617,8 +641,12 @@
       draft: get("draft"),
       draftControl: get("draft-control"),
       linear: get("linear"),
-      linearControl: get("linear-control")
-    };
+      linearControl: get("linear-control"),
+      specModel: get("spec-model"),
+      specModelControl: get("spec-model-control"),
+      specTokens: get("spec-tokens"),
+      specTokensControl: get("spec-tokens-control")
+};
 
     setOptions(
       controls.precision,
@@ -663,6 +691,10 @@
     function render() {
       try {
         const model = selectedModel();
+        const specModel = speculativeModelsFor(sourceData, model).find(function (item) {
+          return item.id === controls.specModel.value;
+        }) || null;
+        controls.specTokensControl.hidden = !(specModel && hasLinearState(model));
         const view = calculateView(model, {
           tokens: controls.tokens.value,
           sequences: controls.sequences.value,
@@ -670,7 +702,9 @@
           precision: controls.precision.value,
           indexerPrecision: controls.indexerPrecision.value,
           includeDraftKvCache: controls.draft.checked,
-          includeLinearAttentionState: controls.linear.checked
+          includeLinearAttentionState: controls.linear.checked,
+          specTokens: specModel ? controls.specTokens.value : 0,
+          speculativeModel: specModel
         }, sourceData);
 
         get("per-device-gib").textContent = view.perDeviceGiB.toFixed(5) + " GiB";
@@ -693,10 +727,22 @@
         get("cache-note").textContent = view.elementPlan.note + tpNote;
         renderBreakdown(get("breakdown"), detailsForView(view), doc);
 
+        const draftDetails = draftDetailsForView(view);
+        const draftPanel = get("draft-panel");
+        draftPanel.hidden = !draftDetails;
+        if (draftDetails) {
+          get("draft-name").textContent = draftDetails.label;
+          const draftLink = get("draft-link");
+          draftLink.href = draftDetails.href || "#";
+          draftLink.title = draftDetails.href || "";
+          renderBreakdown(get("draft-breakdown"), draftDetails.rows, doc);
+        }
+
         get("source").textContent = model.source_url;
         get("source-link").href = model.source_url;
       } catch (error) {
         get("cache-note").textContent = error.message;
+        get("draft-panel").hidden = true;
       }
       if (typeof doc.dispatchEvent === "function") {
         doc.dispatchEvent(new Event("kv-help-refresh"));
@@ -724,6 +770,19 @@
       controls.draft.checked = false;
       controls.linearControl.hidden = !hasLinearState(model);
       controls.linear.checked = hasLinearState(model);
+
+      const specOptions = speculativeModelsFor(sourceData, model);
+      setOptions(
+        controls.specModel,
+        [{ value: "", label: "None" }].concat(specOptions.map(function (item) {
+          return { value: item.id, label: item.repo_id || item.label };
+        })),
+        "",
+        doc
+      );
+      controls.specModelControl.hidden = specOptions.length === 0;
+      controls.specTokensControl.hidden = true;
+      controls.specTokens.value = "0";
       render();
     }
 
@@ -732,6 +791,21 @@
       syncModel();
     });
     controls.model.addEventListener("change", syncModel);
+    controls.specModel.addEventListener("change", function () {
+      const model = selectedModel();
+      const selected = speculativeModelsFor(sourceData, model).find(function (item) {
+        return item.id === controls.specModel.value;
+      });
+      // N drives the target model GDN state growth; use the serving default when provided.
+      controls.specTokens.value = selected
+        ? String(numericField(
+          selected,
+          "default_speculative_tokens",
+          numericField(selected, "dflash_block_size", 1)
+        ))
+        : "0";
+      render();
+    });
     form.addEventListener("input", function (event) {
       if (event.target !== controls.family && event.target !== controls.model) {
         render();
@@ -742,8 +816,28 @@
     syncModel();
   }
 
+  function draftDetailsForView(view) {
+    const spec = view.elementPlan && view.elementPlan.speculative;
+    if (!spec) {
+      return null;
+    }
+    const tp = view.tensorParallel;
+    return {
+      label: spec.label,
+      href: spec.href,
+      description: spec.description,
+      rows: spec.components.map(function (row) {
+        if (row[0] === "Per-token elements") {
+          return ["Per-device KV elements per token", row[1] / tp, row[2]];
+        }
+        return row.slice();
+      })
+    };
+  }
+
   return {
     calculateView: calculateView,
+    draftDetailsForView: draftDetailsForView,
     defaultIndexerPrecision: defaultIndexerPrecision,
     defaultPrecision: defaultPrecision,
     detailsForView: detailsForView,
@@ -754,6 +848,7 @@
     metricRowsForView: metricRowsForView,
     modelsForFamily: modelsForFamily,
     mount: mount,
+    speculativeModelsFor: speculativeModelsFor,
     tpHelpText: tpHelpText,
     validTpSizes: validTpSizes
   };

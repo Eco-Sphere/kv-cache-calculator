@@ -89,6 +89,10 @@ spec.print_report(model_source="...", num_tokens=8192, batch=1, indexer_layout="
 
 依赖见 **`requirements.txt`** / **`requirements-dev.txt`**；跑非跳过用例时需网络以访问 ModelScope。
 
+## 反馈
+
+如果你发现模型参数、计算假设或结果存在问题，欢迎提交 [Issue](https://github.com/Eco-Sphere/kv-cache-calculator/issues/new)。请附上模型与输入配置、预期结果、实际结果和可验证的数据来源。
+
 ## 仓库布局
 
 ```

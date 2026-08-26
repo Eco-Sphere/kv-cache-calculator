@@ -78,7 +78,8 @@
         : sizes.slice(0, -1).join(", ") + ", or " + sizes[sizes.length - 1];
     const headLabel = kvHeads === 1 ? "KV head" : "KV heads";
     return "This model has " + kvHeads + " " + headLabel + ", so TP size can be " + choices
-      + ", because num_key_value_heads / TP size must be an integer.";
+      + ". Only divisors are shown because num_key_value_heads / TP size must be an integer,"
+      + " giving each device a whole number of KV heads.";
   }
 
   function hasIndexer(model) {
@@ -159,26 +160,16 @@
         ),
         includeDraftKvCache: Boolean(input.includeDraftKvCache),
         includeLinearAttentionState: Boolean(input.includeLinearAttentionState),
-        tensorParallel: 1
+        tensorParallel: requestedTp
       },
       precisionConfig(sourceData)
     );
 
     const deviceGroups = result.cacheGroups.map(function (group) {
-      const replicated = group.role === "indexer";
-      const perDeviceBytes = replicated ? group.bytes : group.bytes / requestedTp;
-      return Object.assign({}, group, {
-        replicated: replicated,
-        perDeviceBytes: perDeviceBytes,
-        allDeviceBytes: perDeviceBytes * requestedTp
-      });
+      return Object.assign({}, group);
     });
-    const perDeviceBytes = deviceGroups.reduce(function (sum, group) {
-      return sum + group.perDeviceBytes;
-    }, 0);
-    const allDeviceBytes = deviceGroups.reduce(function (sum, group) {
-      return sum + group.allDeviceBytes;
-    }, 0);
+    const perDeviceBytes = result.perDeviceBytes;
+    const allDeviceBytes = result.allDeviceBytes;
 
     return Object.assign({}, result, {
       model: model,
@@ -203,10 +194,17 @@
     });
   }
 
-  function scaledDetail(label, value, help, divisor, nextLabel) {
+  function groupRatio(group, fallbackTp) {
+    if (group && Number.isFinite(group.localHeads) && Number.isFinite(group.heads)) {
+      return group.localHeads / group.heads;
+    }
+    return 1 / fallbackTp;
+  }
+
+  function scaledDetail(label, value, help, ratio, nextLabel) {
     return [
       nextLabel || label,
-      typeof value === "number" ? value / divisor : value,
+      typeof value === "number" ? value * ratio : value,
       help
     ];
   }
@@ -221,6 +219,12 @@
     const values = Object.fromEntries(original.map(function (row) {
       return [row[0], row[1]];
     }));
+    const groupsByLabel = Object.fromEntries(view.deviceGroups.map(function (group) {
+      return [group.label, group];
+    }));
+    const kvGroup = view.deviceGroups.find(function (group) { return group.role === "kv"; });
+    const indexerGroup = view.deviceGroups.find(function (group) { return group.role === "indexer"; });
+    const linearGroup = view.deviceGroups.find(function (group) { return group.role === "linear_state"; });
     const rows = [];
 
     original.forEach(function (row) {
@@ -228,22 +232,12 @@
       const value = row[1];
       const help = row[2];
 
-      if (formula === "minimax_msa" && label === "Index heads") {
-        rows.push(["Index Q heads", numericField(model, "index_n_heads", 4), help]);
-        rows.push([
-          "Index K heads",
-          1,
-          "The Indexer stores one key head, replicated across tensor-parallel devices."
-        ]);
-        return;
-      }
-
       if ((formula === "standard_gqa" || formula === "mla") && label === "Per-token elements") {
         rows.push(scaledDetail(
           label,
           value,
           help,
-          tp,
+          groupRatio(kvGroup, tp),
           "Per-device KV elements per token"
         ));
         return;
@@ -251,11 +245,11 @@
 
       if (formula === "dsa_mla") {
         if (label === "KV elements per token") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device KV elements per token"));
+          rows.push(scaledDetail(label, value, help, groupRatio(kvGroup, tp), "Per-device KV elements per token"));
           return;
         }
         if (label === "Indexer elements per token") {
-          rows.push(["Per-device Indexer elements per token", value, help]);
+          rows.push(scaledDetail(label, value, help, groupRatio(indexerGroup, tp), "Per-device Indexer elements per token"));
           return;
         }
         if (label === "Per-token elements") {
@@ -263,7 +257,7 @@
           const indexer = Number(values["Indexer elements per token"]) || 0;
           rows.push([
             "Per-device total elements per token",
-            kv / tp + indexer,
+            kv * groupRatio(kvGroup, tp) + indexer * groupRatio(indexerGroup, tp),
             help
           ]);
           return;
@@ -272,11 +266,11 @@
 
       if (formula === "qwen_linear_full_hybrid") {
         if (label === "Linear conv elements") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device linear conv elements"));
+          rows.push(scaledDetail(label, value, help, groupRatio(linearGroup, tp), "Per-device linear conv elements"));
           return;
         }
         if (label === "Linear recurrent elements") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device linear recurrent elements"));
+          rows.push(scaledDetail(label, value, help, groupRatio(linearGroup, tp), "Per-device linear recurrent elements"));
           return;
         }
         if (label === "Per-token elements") {
@@ -284,7 +278,7 @@
             label,
             value,
             help,
-            tp,
+            groupRatio(kvGroup, tp),
             "Per-device KV elements per token"
           ));
           return;
@@ -293,22 +287,22 @@
 
       if (formula === "mixed_full_sliding_gqa") {
         if (label === "Full-attention elements") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device full-attention elements"));
+          rows.push(scaledDetail(label, value, help, groupRatio(groupsByLabel["Full-attention KV cache"], tp), "Per-device full-attention elements"));
           return;
         }
         if (label === "Sliding-window elements") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device sliding-window elements"));
+          rows.push(scaledDetail(label, value, help, groupRatio(groupsByLabel["Sliding-window KV cache"], tp), "Per-device sliding-window elements"));
           return;
         }
       }
 
       if (formula === "minimax_msa") {
         if (label === "KV elements per token") {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device KV elements per token"));
+          rows.push(scaledDetail(label, value, help, groupRatio(kvGroup, tp), "Per-device KV elements per token"));
           return;
         }
         if (label === "Indexer elements per token") {
-          rows.push(["Per-device Indexer elements per token", value, help]);
+          rows.push(scaledDetail(label, value, help, groupRatio(indexerGroup, tp), "Per-device Indexer elements per token"));
           return;
         }
       }
@@ -321,11 +315,11 @@
           "KV elements"
         ];
         if (shardedLabels.includes(label)) {
-          rows.push(scaledDetail(label, value, help, tp, "Per-device " + label.toLowerCase()));
+          rows.push(scaledDetail(label, value, help, groupRatio(kvGroup, tp), "Per-device " + label.toLowerCase()));
           return;
         }
         if (label === "Indexer elements") {
-          rows.push(["Per-device Indexer elements", value, help]);
+          rows.push(scaledDetail(label, value, help, groupRatio(indexerGroup, tp), "Per-device Indexer elements"));
           return;
         }
       }
@@ -339,6 +333,7 @@
   }
 
   function formulaRowsForView(view) {
+    const formula = view.model.formula;
     const rows = (view.elementPlan.formulaRows || []).map(function (row) {
       return {
         name: row.name,
@@ -346,33 +341,95 @@
         description: row.description
       };
     });
-    const hasReplicatedIndexer = view.deviceGroups.some(function (group) {
-      return group.replicated;
-    });
-    if (hasReplicatedIndexer) {
-      rows.push({
-        name: "per_device_bytes",
-        expression: "sharded_cache_bytes / TP size + replicated_indexer_bytes",
-        description: "The indexer has one stored key head and is replicated on every TP device."
-      });
-      rows.push({
-        name: "all_device_bytes",
-        expression: "sharded_cache_bytes + TP size × replicated_indexer_bytes",
-        description: "Physical cache across all devices includes one indexer copy per TP device."
-      });
-    } else {
-      rows.push({
-        name: "per_device_bytes",
-        expression: "total_bytes / TP size",
-        description: "The cache is evenly sharded across valid tensor-parallel devices."
-      });
-      rows.push({
-        name: "all_device_bytes",
-        expression: "total_bytes",
-        description: "Sharded cache is counted once across all tensor-parallel devices."
-      });
+    function withoutSequences(expression) {
+      return expression
+        .replace(/tokens x sequences x /g, "tokens x ")
+        .replace(/min\(tokens, sliding_window\) x sequences x /g, "min(tokens, sliding_window) x ")
+        .replace(/^sequences x /, "");
     }
-    return rows;
+    function localHeads(expression, field) {
+      return expression.replace(
+        new RegExp("\\b" + field + "\\b", "g"),
+        "max(" + field + " / TP size, 1)"
+      );
+    }
+    function rowWith(row, name, expression, description) {
+      return {
+        name: name || row.name,
+        expression: expression,
+        description: description || row.description
+      };
+    }
+
+    let terms;
+    const perDeviceRows = [];
+
+    rows.forEach(function (row) {
+      let expression = withoutSequences(row.expression);
+
+      if (row.name === "total_bytes") {
+        return;
+      }
+
+      if (formula === "standard_gqa" && row.name !== "active_layers") {
+        expression = localHeads(expression, "num_key_value_heads");
+      }
+      if (formula === "dsa_mla" && row.name === "indexer_bytes") {
+        expression = localHeads(expression, "index_num_key_heads");
+      }
+      if (formula === "qwen_linear_full_hybrid") {
+        expression = localHeads(expression, "num_key_value_heads");
+        expression = localHeads(expression, "linear_num_key_heads");
+        expression = localHeads(expression, "linear_num_value_heads");
+      }
+      if (formula === "mixed_full_sliding_gqa") {
+        expression = localHeads(expression, "full_kv_heads");
+        expression = localHeads(expression, "sliding_kv_heads");
+      }
+      if (formula === "minimax_msa" && row.name === "kv_bytes") {
+        expression = localHeads(expression, "num_key_value_heads");
+      }
+      if ((formula === "minimax_msa" || formula === "deepseek_v4_hybrid") && row.name === "indexer_bytes") {
+        expression = localHeads(expression, "index_num_key_heads");
+      }
+
+      perDeviceRows.push(rowWith(row, null, expression));
+    });
+
+    if (formula === "standard_gqa") {
+      const total = rows.find(function (row) { return row.name === "total_bytes"; });
+      let expression = withoutSequences(total.expression);
+      expression = localHeads(expression, "num_key_value_heads");
+      perDeviceRows.push(rowWith(total, "kv_bytes", expression, "Per-sequence KV cache using the local KV-head count."));
+      terms = "kv_bytes";
+    } else if (formula === "mla") {
+      const total = rows.find(function (row) { return row.name === "total_bytes"; });
+      perDeviceRows.push(rowWith(total, "kv_bytes", withoutSequences(total.expression), "Per-sequence latent KV cache; its single head is present on every TP device."));
+      terms = "kv_bytes";
+    } else if (formula === "dsa_mla") {
+      terms = "kv_bytes + indexer_bytes";
+    } else if (formula === "qwen_linear_full_hybrid") {
+      terms = perDeviceRows.some(function (row) { return row.name === "linear_conv_state_bytes"; })
+        ? "full_kv_bytes + linear_conv_state_bytes + linear_recurrent_state_bytes"
+        : "full_kv_bytes";
+    } else if (formula === "mixed_full_sliding_gqa") {
+      terms = "full_kv_bytes + sliding_kv_bytes";
+    } else {
+      terms = "kv_bytes + indexer_bytes";
+    }
+
+    const perDevicePayload = terms.includes(" + ") ? "(" + terms + ")" : terms;
+    perDeviceRows.push({
+      name: "per_device_bytes",
+      expression: "sequences × " + perDevicePayload,
+      description: "Per-device cache for all concurrent sequences after applying each cache group's local head count."
+    });
+    perDeviceRows.push({
+      name: "all_device_bytes",
+      expression: "TP size × per_device_bytes",
+      description: "Physical cache across all tensor-parallel devices."
+    });
+    return perDeviceRows;
   }
 
   function metricRowsForView(view) {
@@ -687,9 +744,7 @@
 
         get("formula-label").textContent = view.elementPlan.formulaLabel;
         renderFormula(get("formula-list"), formulaRowsForView(view), doc);
-        const tpNote = view.deviceGroups.some(function (group) { return group.replicated; })
-          ? " Per-device values shard non-indexer cache across TP and replicate the one-key-head indexer cache on every device."
-          : " Per-device values assume even cache sharding across valid TP devices.";
+        const tpNote = " Each cache group uses max(heads / TP size, 1) local heads per device.";
         get("cache-note").textContent = view.elementPlan.note + tpNote;
         renderBreakdown(get("breakdown"), detailsForView(view), doc);
 
@@ -752,6 +807,7 @@
     hasIndexer: hasIndexer,
     hasLinearState: hasLinearState,
     metricRowsForView: metricRowsForView,
+    formulaRowsForView: formulaRowsForView,
     modelsForFamily: modelsForFamily,
     mount: mount,
     tpHelpText: tpHelpText,

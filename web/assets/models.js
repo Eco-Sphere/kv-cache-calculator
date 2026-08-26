@@ -107,6 +107,7 @@
         ],
         "head_dim": 512,
         "index_head_dim": 128,
+        "index_num_key_heads": 1,
         "index_topk": 1024,
         "num_hidden_layers": 61,
         "num_key_value_heads": 1,
@@ -171,6 +172,7 @@
         ],
         "head_dim": 512,
         "index_head_dim": 128,
+        "index_num_key_heads": 1,
         "index_topk": 512,
         "num_hidden_layers": 43,
         "num_key_value_heads": 1,
@@ -188,6 +190,7 @@
       "family": "DeepSeek",
       "fields": {
         "index_head_dim": 128,
+        "index_num_key_heads": 1,
         "index_n_heads": 64,
         "index_topk": 2048,
         "kv_lora_rank": 512,
@@ -249,6 +252,7 @@
       "family": "GLM",
       "fields": {
         "index_head_dim": 128,
+        "index_num_key_heads": 1,
         "index_n_heads": 32,
         "index_topk": 2048,
         "kv_lora_rank": 512,
@@ -272,6 +276,7 @@
       "family": "GLM",
       "fields": {
         "index_head_dim": 128,
+        "index_num_key_heads": 1,
         "index_n_heads": 32,
         "index_topk": 2048,
         "kv_lora_rank": 512,
@@ -296,6 +301,7 @@
       "fields": {
         "draft_indexer_layers": 1,
         "index_head_dim": 128,
+        "index_num_key_heads": 1,
         "index_n_heads": 32,
         "index_share_for_mtp_iteration": true,
         "index_skip_topk_offset": 3,
@@ -1191,6 +1197,7 @@
         "index_block_size": 128,
         "index_head_dim": 128,
         "index_local_blocks": 1,
+        "index_num_key_heads": 1,
         "index_n_heads": 4,
         "index_topk_blocks": 16,
         "indexer_fixed_precision_id": "bf16_fp16",

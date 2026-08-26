@@ -232,7 +232,7 @@
           },
         ],
         note: "Production estimate of base KV payload; allocator and memory-pool bytes are excluded. Draft KV is included only when the checkbox is enabled.",
-        byteGroups: [{ role: "kv", label: "KV cache", elements: elementsPerToken * tokens }],
+        byteGroups: [{ role: "kv", label: "KV cache", heads: kvHeads, elements: elementsPerToken * tokens }],
         components: [
           ["Main layers", layers],
           ["Draft layers included", draftLayers, "Extra MTP/draft layers included in KV capacity when the checkbox is enabled."],
@@ -268,7 +268,7 @@
           },
         ],
         note: "Production estimate of MLA latent KV payload; allocator and memory-pool bytes are excluded. Draft KV is included only when the checkbox is enabled.",
-        byteGroups: [{ role: "kv", label: "KV cache", elements: elementsPerToken * tokens }],
+        byteGroups: [{ role: "kv", label: "KV cache", heads: 1, elements: elementsPerToken * tokens }],
         components: [
           ["Main layers", layers],
           ["Draft layers included", draftLayers, "Extra MTP/draft layers included in KV capacity when the checkbox is enabled."],
@@ -284,10 +284,12 @@
       const activeLayers = layers + draftLayers;
       const indexerPlan = indexerLayerPlan(model, layers, draftLayers);
       const indexDim = getField(model, "index_head_dim");
+      const indexKeyHeads = getField(model, "index_num_key_heads");
+      const indexQueryHeads = optionalField(model, "index_n_heads", indexKeyHeads);
       const kvRank = getField(model, "kv_lora_rank");
       const ropeDim = getField(model, "qk_rope_head_dim");
       const kvElementsPerLayer = kvRank + ropeDim;
-      const indexerElementsPerLayer = indexDim;
+      const indexerElementsPerLayer = indexKeyHeads * indexDim;
 
       const kvElementsPerToken = activeLayers * kvElementsPerLayer;
       const indexerElementsPerToken =
@@ -298,7 +300,7 @@
         elementsPerToken,
         formulaLabel: FORMULA_LABELS[formula],
         formulaText:
-          "active_layers = main_layers + draft_layers_if_enabled\nactive_indexer_layers = main_indexer_layers + draft_indexer_layers_if_enabled\nkv_bytes = tokens * sequences * active_layers * (kv_lora_rank + qk_rope_head_dim) * kv_precision_bytes\nindexer_bytes = tokens * sequences * active_indexer_layers * index_head_dim * indexer_precision_bytes\ntotal_bytes = kv_bytes + indexer_bytes",
+          "active_layers = main_layers + draft_layers_if_enabled\nactive_indexer_layers = main_indexer_layers + draft_indexer_layers_if_enabled\nkv_bytes = tokens * sequences * active_layers * (kv_lora_rank + qk_rope_head_dim) * kv_precision_bytes\nindexer_bytes = tokens * sequences * active_indexer_layers * index_num_key_heads * index_head_dim * indexer_precision_bytes\ntotal_bytes = kv_bytes + indexer_bytes",
         formulaRows: [
           {
             name: "active_layers",
@@ -317,7 +319,7 @@
           },
           {
             name: "indexer_bytes",
-            expression: "tokens x sequences x active_indexer_layers x index_head_dim x indexer_precision_bytes",
+            expression: "tokens x sequences x active_indexer_layers x index_num_key_heads x index_head_dim x indexer_precision_bytes",
             description: "Additional per-token indexer state used by the indexer attention path.",
           },
           {
@@ -330,8 +332,8 @@
           ? "Production estimate uses latent KV plus independently stored indexer state; shared indexer layers reuse the full indexer layers' selection. Expanded HF-compatible cache is not included."
           : "Production estimate uses latent KV plus indexer state; expanded HF-compatible cache is not included.",
         byteGroups: [
-          { role: "kv", label: "KV cache", elements: kvElementsPerToken * tokens },
-          { role: "indexer", label: "Indexer cache", elements: indexerElementsPerToken * tokens },
+          { role: "kv", label: "KV cache", heads: 1, elements: kvElementsPerToken * tokens },
+          { role: "indexer", label: "Indexer cache", heads: indexKeyHeads, elements: indexerElementsPerToken * tokens },
         ],
         components: [
           ["Main layers", layers],
@@ -341,8 +343,10 @@
           ["Draft indexer layers included", indexerPlan.draftIndexerLayers, "Draft/MTP indexer layers counted when Include draft KV cache is enabled."],
           ["KV elements per token", kvElementsPerToken, "Latent KV elements per token before applying KV precision."],
           ["Indexer elements per token", indexerElementsPerToken, "Indexer elements per token before applying indexer precision."],
+          ["Index Q heads", indexQueryHeads, "Indexer query heads used for scoring."],
+          ["Index K heads", indexKeyHeads, "Stored Indexer key heads used by both cache sizing and TP distribution."],
           ["Per-token elements", elementsPerToken, "KV plus indexer scalar elements per token before multiplying by precision bytes."],
-          ["Model fields", fieldList(model, ["num_hidden_layers", "kv_lora_rank", "qk_rope_head_dim", "index_head_dim", "indexer_full_layers", "indexer_shared_layers", "draft_indexer_layers"])],
+          ["Model fields", fieldList(model, ["num_hidden_layers", "kv_lora_rank", "qk_rope_head_dim", "index_head_dim", "index_n_heads", "index_num_key_heads", "indexer_full_layers", "indexer_shared_layers", "draft_indexer_layers"])],
         ],
       };
     }
@@ -366,18 +370,14 @@
       const convLength = specTokens > 0 ? linearConvKernel - 1 + specTokens : linearConvKernel;
       const elementsPerToken = fullLayers * 2 * kvHeads * headDim;
       const fullElements = elementsPerToken * tokens;
-      const linearConvElements =
-        linearLayers *
-        stateCopies *
-        convLength *
-        (2 * linearKeyHeads * linearKeyDim + linearValueHeads * linearValueDim);
-      const linearRecurrentElements = linearLayers * stateCopies * linearValueHeads * linearKeyDim * linearValueDim;
-      const linearStateBytesPerSequence =
-        includeLinearAttentionState
-          ? linearConvElements * QWEN_LINEAR_CONV_BYTES_PER_ELEMENT +
-            linearRecurrentElements * QWEN_LINEAR_RECURRENT_BYTES_PER_ELEMENT
-          : 0;
-      const byteGroups = [{ role: "kv", label: "Full-attention KV cache", elements: fullElements }];
+      const linearKeyConvElements =
+        linearLayers * stateCopies * convLength * 2 * linearKeyHeads * linearKeyDim;
+      const linearValueConvElements =
+        linearLayers * stateCopies * convLength * linearValueHeads * linearValueDim;
+      const linearConvElements = linearKeyConvElements + linearValueConvElements;
+      const linearRecurrentElements =
+        linearLayers * stateCopies * linearValueHeads * linearKeyDim * linearValueDim;
+      const byteGroups = [{ role: "kv", label: "Full-attention KV cache", heads: kvHeads, elements: fullElements }];
       const formulaRows = [
         {
           name: "full_kv_bytes",
@@ -387,11 +387,26 @@
       ];
 
       if (includeLinearAttentionState) {
-        byteGroups.push({
-          role: "linear_state",
-          label: "Linear-attention state",
-          bytesPerSequence: linearStateBytesPerSequence,
-        });
+        byteGroups.push(
+          {
+            role: "linear_state",
+            label: "Linear-attention key conv state",
+            heads: linearKeyHeads,
+            bytesPerSequence: linearKeyConvElements * QWEN_LINEAR_CONV_BYTES_PER_ELEMENT,
+          },
+          {
+            role: "linear_state",
+            label: "Linear-attention value conv state",
+            heads: linearValueHeads,
+            bytesPerSequence: linearValueConvElements * QWEN_LINEAR_CONV_BYTES_PER_ELEMENT,
+          },
+          {
+            role: "linear_state",
+            label: "Linear-attention recurrent state",
+            heads: linearValueHeads,
+            bytesPerSequence: linearRecurrentElements * QWEN_LINEAR_RECURRENT_BYTES_PER_ELEMENT,
+          },
+        );
         formulaRows.push(
           {
             name: "linear_conv_state_bytes",
@@ -521,8 +536,8 @@
         ],
         note: "Production estimate counts text-generation KV payload only. Vision/audio encoder activations and allocator memory are excluded.",
         byteGroups: [
-          { role: "kv", label: "Full-attention KV cache", elements: fullElements },
-          { role: "kv", label: "Sliding-window KV cache", elements: slidingElements },
+          { role: "kv", label: "Full-attention KV cache", heads: fullKvHeads, elements: fullElements },
+          { role: "kv", label: "Sliding-window KV cache", heads: slidingKvHeads, elements: slidingElements },
         ],
         components: [
           ["Main layers", layers],
@@ -565,7 +580,7 @@
           },
         ],
         note: "Production estimate for a sliding-window-only attention model; each layer retains at most sliding_window tokens of KV per sequence.",
-        byteGroups: [{ role: "kv", label: "Sliding-window KV cache", elements }],
+        byteGroups: [{ role: "kv", label: "Sliding-window KV cache", heads: kvHeads, elements }],
         components: [
           ["Main layers", layers],
           ["Sliding window", slidingWindow, "Per-layer KV retention cap in tokens."],
@@ -583,14 +598,15 @@
       const kvHeads = getField(model, "num_key_value_heads");
       const headDim = getField(model, "head_dim");
       const indexDim = getField(model, "index_head_dim");
-      const indexHeads = optionalField(model, "index_n_heads", kvHeads);
+      const indexKeyHeads = getField(model, "index_num_key_heads");
+      const indexQueryHeads = optionalField(model, "index_n_heads", kvHeads);
       const blockSize = getField(model, "index_block_size");
       const topkBlocks = getField(model, "index_topk_blocks");
       const localBlocks = optionalField(model, "index_local_blocks", 0);
       const mtpModules = optionalField(model, "num_mtp_modules", 0);
       const nextnLayers = optionalField(model, "num_nextn_predict_layers", 0);
       const kvElementsPerToken = layers * 2 * kvHeads * headDim;
-      const indexerElementsPerToken = sparseLayers * indexDim;
+      const indexerElementsPerToken = sparseLayers * indexKeyHeads * indexDim;
       const elementsPerToken = kvElementsPerToken + indexerElementsPerToken;
       const kvElements = kvElementsPerToken * tokens;
       const indexerElements = indexerElementsPerToken * tokens;
@@ -600,28 +616,28 @@
         elementsPerToken,
         formulaLabel: FORMULA_LABELS[formula],
         formulaText:
-          "kv_bytes = tokens * sequences * layers * 2 * num_key_value_heads * head_dim * kv_precision_bytes\nindexer_bytes = tokens * sequences * sparse_attention_layers * index_head_dim * indexer_precision_bytes\ntotal_bytes = kv_bytes + indexer_bytes",
+          "kv_bytes = tokens * layers * 2 * num_key_value_heads * head_dim * kv_precision_bytes\nindexer_bytes = tokens * sparse_attention_layers * index_num_key_heads * index_head_dim * indexer_precision_bytes\ntotal_bytes = sequences * (kv_bytes + indexer_bytes)",
         formulaRows: [
           {
             name: "kv_bytes",
-            expression: "tokens x sequences x layers x 2 x num_key_value_heads x head_dim x kv_precision_bytes",
-            description: "MiniMax M3 stores ordinary main K/V cache for both full-attention and sparse-attention layers.",
+            expression: "tokens x layers x 2 x num_key_value_heads x head_dim x kv_precision_bytes",
+            description: "For one sequence, MiniMax M3 stores ordinary main K/V cache for both full-attention and sparse-attention layers.",
           },
           {
             name: "indexer_bytes",
-            expression: "tokens x sequences x sparse_attention_layers x index_head_dim x indexer_precision_bytes",
-            description: "MSA sparse layers keep a key-only side cache for the lightning indexer; index_n_heads affects scoring, not the stored index-key cache width.",
+            expression: "tokens x sparse_attention_layers x index_num_key_heads x index_head_dim x indexer_precision_bytes",
+            description: "For one sequence, MSA sparse layers keep a key-only side cache for the lightning indexer; index_n_heads affects scoring, not the stored index-key cache width.",
           },
           {
             name: "total_bytes",
-            expression: "kv_bytes + indexer_bytes",
-            description: "Combined main KV cache and MSA index-key side cache.",
+            expression: "sequences x (kv_bytes + indexer_bytes)",
+            description: "Combined main KV cache and MSA index-key side cache for all concurrent sequences.",
           },
         ],
         note: "MiniMax Sparse Attention (MSA) uses a lightweight indexer to pick the most relevant KV blocks for each query, so long-context attention can read a sparse subset of the cached tokens while keeping a separate indexer cache for block selection.",
         byteGroups: [
-          { role: "kv", label: "KV cache", elements: kvElements },
-          { role: "indexer", label: "Indexer cache", elements: indexerElements },
+          { role: "kv", label: "KV cache", heads: kvHeads, elements: kvElements },
+          { role: "indexer", label: "Indexer cache", heads: indexKeyHeads, elements: indexerElements },
         ],
         components: [
           ["Main layers", layers],
@@ -629,13 +645,14 @@
           ["Sparse-attention layers", sparseLayers, "MSA layers that add a key-only indexer side cache."],
           ["KV elements per token", kvElementsPerToken, "Main K/V elements per token before applying KV precision."],
           ["Indexer elements per token", indexerElementsPerToken, "MSA index-key elements per token before applying indexer precision."],
-          ["Index heads", indexHeads, "Indexer query heads used for scoring selected KV blocks; the stored index-key cache is key-only."],
+          ["Index Q heads", indexQueryHeads, "Indexer query heads used for scoring selected KV blocks."],
+          ["Index K heads", indexKeyHeads, "Stored Indexer key heads used by both cache sizing and TP distribution."],
           ["Index block size", blockSize, "Number of tokens per sparse-selection block. This is not a sliding-window cache cap."],
           ["Top-k blocks", topkBlocks, "Sparse blocks selected by the indexer for each query."],
           ["Local blocks", localBlocks, "Recent local blocks always visible to the sparse attention path."],
           ["MTP modules not included", mtpModules, "The public MiniMax M3 checkpoint/config exposes MTP fields, but bundled MTP weights are not modeled in the base serving path."],
           ["Next-N layers not included", nextnLayers, "Config field retained for traceability; draft KV is not included for MiniMax M3."],
-          ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "sparse_attention_layers", "num_key_value_heads", "head_dim", "index_head_dim", "index_n_heads", "index_block_size", "index_topk_blocks", "index_local_blocks", "indexer_fixed_precision_id"])],
+          ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "sparse_attention_layers", "num_key_value_heads", "head_dim", "index_head_dim", "index_n_heads", "index_num_key_heads", "index_block_size", "index_topk_blocks", "index_local_blocks", "indexer_fixed_precision_id"])],
         ],
       };
     }
@@ -643,6 +660,7 @@
     if (formula === "deepseek_v4_hybrid") {
       const headDim = getField(model, "head_dim");
       const indexDim = getField(model, "index_head_dim");
+      const indexKeyHeads = getField(model, "index_num_key_heads");
       const slidingWindow = getField(model, "sliding_window");
       const layers = getField(model, "num_hidden_layers");
       const allRatios = Array.isArray(model.fields.compress_ratios)
@@ -670,7 +688,7 @@
           compressedElements += Math.floor(tokens / ratio) * headDim;
         }
         if (ratio === 4) {
-          indexerElements += Math.floor(tokens / 4) * indexDim;
+          indexerElements += Math.floor(tokens / 4) * indexKeyHeads * indexDim;
         }
       });
 
@@ -681,7 +699,7 @@
         elementsPerToken: elementsPerSequence / tokens,
         formulaLabel: FORMULA_LABELS[formula],
         formulaText:
-          "sliding_kv_bytes = active_layers * sliding_window * head_dim * kv_precision_bytes\ncompressed_kv_bytes = sum_ratio>0(floor(tokens / compress_ratio) * head_dim) * kv_precision_bytes\nkv_bytes = sliding_kv_bytes + compressed_kv_bytes\nindexer_bytes = ratio4_layers * floor(tokens / 4) * index_head_dim * indexer_precision_bytes\ntotal_bytes = sequences * (kv_bytes + indexer_bytes)",
+          "sliding_kv_bytes = active_layers * sliding_window * head_dim * kv_precision_bytes\ncompressed_kv_bytes = sum_ratio>0(floor(tokens / compress_ratio) * head_dim) * kv_precision_bytes\nkv_bytes = sliding_kv_bytes + compressed_kv_bytes\nindexer_bytes = ratio4_layers * floor(tokens / 4) * index_num_key_heads * index_head_dim * indexer_precision_bytes\ntotal_bytes = sequences * (kv_bytes + indexer_bytes)",
         formulaRows: [
           {
             name: "sliding_kv_bytes",
@@ -701,7 +719,7 @@
           {
             name: "indexer_bytes",
             expression:
-              "ratio4_layers x floor(tokens / 4) x index_head_dim x indexer_precision_bytes",
+              "ratio4_layers x floor(tokens / 4) x index_num_key_heads x index_head_dim x indexer_precision_bytes",
             description: "Ratio=4 layers keep an extra compressed indexer cache that can use a separate precision.",
           },
           {
@@ -712,8 +730,8 @@
         ],
         note: "Production estimate uses the official sliding-window/compressed-cache layout. The default DeepSeek V4 setting uses FP8 attention cache and FP4 indexer cache.",
         byteGroups: [
-          { role: "kv", label: "KV cache", elements: attentionElements },
-          { role: "indexer", label: "Indexer cache", elements: indexerElements },
+          { role: "kv", label: "KV cache", heads: 1, elements: attentionElements },
+          { role: "indexer", label: "Indexer cache", heads: indexKeyHeads, elements: indexerElements },
         ],
         components: [
           ["Main layers", mainRatios.length],
@@ -726,6 +744,7 @@
           ["Compressed elements", compressedElements, "Compressed KV elements from layers with compress_ratio greater than zero."],
           ["KV elements", attentionElements, "Sliding-window plus compressed attention cache elements before applying KV precision."],
           ["Indexer elements", indexerElements, "Compressed indexer elements from ratio=4 layers before applying indexer precision."],
+          ["Index K heads", indexKeyHeads, "Stored Indexer key heads used by both cache sizing and TP distribution."],
         ],
       };
     }
@@ -753,6 +772,7 @@
       draftNames.forEach((name) => {
         expression = expression.replace(new RegExp(`\\b${name}\\b`, "g"), `draft_${name}`);
       });
+      expression = expression.replace(/\bnum_key_value_heads\b/g, "draft_num_key_value_heads");
       return {
         name: `draft_${row.name}`,
         expression,
@@ -789,15 +809,39 @@
   }
 
   function calculateCacheGroups(elementPlan, precision) {
-    const groups = elementPlan.byteGroups || [{ role: "cache", elements: elementPlan.elementsPerSequence }];
+    const groups = elementPlan.byteGroups || [{ role: "cache", heads: 1, elements: elementPlan.elementsPerSequence }];
     return groups.map((group) => ({
       role: group.role,
       label: group.label || "KV cache",
+      heads: toPositiveInteger(group.heads, 1),
       elements: group.elements,
       bytesPerSequence: Number.isFinite(group.bytesPerSequence)
         ? group.bytesPerSequence
         : group.elements * bytesPerElementForGroup(precision, group.role),
     }));
+  }
+
+  function distributeHeads(heads, tensorParallel) {
+    const globalHeads = toPositiveInteger(heads, 1);
+    const tp = toPositiveInteger(tensorParallel, 1);
+    let localHeads;
+    if (globalHeads >= tp && globalHeads % tp === 0) {
+      localHeads = globalHeads / tp;
+    } else if (globalHeads < tp && tp % globalHeads === 0) {
+      localHeads = 1;
+    } else {
+      throw new RangeError(
+        `Cache group with ${globalHeads} heads cannot be distributed across TP size ${tp}`,
+      );
+    }
+    const physicalHeads = localHeads * tp;
+    return {
+      heads: globalHeads,
+      localHeads,
+      replicated: physicalHeads > globalHeads,
+      replicationFactor: physicalHeads / globalHeads,
+      perDeviceRatio: localHeads / globalHeads,
+    };
   }
 
   function precisionComponents(precision) {
@@ -847,15 +891,37 @@
     if (input.speculativeModel) {
       elementPlan = mergeSpeculativeDraft(elementPlan, input.speculativeModel, tokens);
     }
-    const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision);
+    const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision).map((group) => {
+      const distribution = distributeHeads(group.heads, tensorParallel);
+      return {
+        ...group,
+        ...distribution,
+        bytesPerHeadPerSequence: group.bytesPerSequence / distribution.heads,
+        perDeviceBytesPerSequence:
+          (group.bytesPerSequence / distribution.heads) * distribution.localHeads,
+      };
+    });
     const bytesPerSequence = cacheGroupsPerSequence.reduce((total, group) => total + group.bytesPerSequence, 0);
     const totalBytes = bytesPerSequence * sequences;
-    const cacheGroups = cacheGroupsPerSequence.map((group) => ({
-      role: group.role,
-      label: group.label,
-      elements: Number.isFinite(group.elements) ? group.elements * sequences : undefined,
-      bytes: group.bytesPerSequence * sequences,
-    }));
+    const cacheGroups = cacheGroupsPerSequence.map((group) => {
+      const bytes = group.bytesPerSequence * sequences;
+      const perDeviceBytes = group.perDeviceBytesPerSequence * sequences;
+      return {
+        role: group.role,
+        label: group.label,
+        heads: group.heads,
+        localHeads: group.localHeads,
+        replicated: group.replicated,
+        replicationFactor: group.replicationFactor,
+        bytesPerHead: group.bytesPerHeadPerSequence * sequences,
+        elements: Number.isFinite(group.elements) ? group.elements * sequences : undefined,
+        bytes,
+        perDeviceBytes,
+        allDeviceBytes: perDeviceBytes * tensorParallel,
+      };
+    });
+    const perDeviceBytes = cacheGroups.reduce((total, group) => total + group.perDeviceBytes, 0);
+    const allDeviceBytes = cacheGroups.reduce((total, group) => total + group.allDeviceBytes, 0);
     const kvBytes = cacheGroups
       .filter((group) => group.role === "kv" || group.role === "attention" || group.role === "cache")
       .reduce((total, group) => total + group.bytes, 0);
@@ -882,8 +948,9 @@
       indexerGiB: indexerBytes / BYTES_PER_GIB,
       bytesPerSequence,
       bytesPerToken: bytesPerSequence / tokens,
-      perDeviceBytes: totalBytes / tensorParallel,
-      perDeviceGiB: totalBytes / tensorParallel / BYTES_PER_GIB,
+      perDeviceBytes,
+      perDeviceGiB: perDeviceBytes / BYTES_PER_GIB,
+      allDeviceBytes,
       cacheGroups,
       elementPlan,
       components: elementPlan.components.concat(precisionComponents(cachePrecision)),
@@ -1267,6 +1334,7 @@
     BYTES_PER_GIB,
     calculate,
     calculateElementsPerSequence,
+    distributeHeads,
     formatBytes,
     modelFamily,
     modelsForFamily,

@@ -30,6 +30,7 @@
     dsa_mla: "DSA/MLA with indexer",
     qwen_linear_full_hybrid: "Qwen linear/full hybrid",
     mixed_full_sliding_gqa: "Mixed full/sliding GQA",
+    sliding_gqa: "Sliding-window GQA",
     minimax_msa: "MiniMax MSA sparse attention",
     deepseek_v4_hybrid: "DeepSeek V4 hybrid sparse attention",
   };
@@ -362,14 +363,20 @@
       const linearValueDim = getField(model, "linear_value_head_dim");
       const linearConvKernel = getField(model, "linear_conv_kernel_dim");
       const mtpLayers = optionalField(model, "mtp_num_hidden_layers", 0);
+      // Speculative decoding (RFC #9, semantics from RFC #1): the target model keeps
+      // 1 + N copies of the GDN state for rollback, and each conv state widens to K - 1 + N.
+      const specTokens = Math.max(0, Math.floor(Number(settings && settings.specTokens) || 0));
+      const stateCopies = specTokens > 0 ? 1 + specTokens : 1;
+      const convLength = specTokens > 0 ? linearConvKernel - 1 + specTokens : linearConvKernel;
       const elementsPerToken = fullLayers * 2 * kvHeads * headDim;
       const fullElements = elementsPerToken * tokens;
       const linearKeyConvElements =
-        linearLayers * linearConvKernel * 2 * linearKeyHeads * linearKeyDim;
+        linearLayers * stateCopies * convLength * 2 * linearKeyHeads * linearKeyDim;
       const linearValueConvElements =
-        linearLayers * linearConvKernel * linearValueHeads * linearValueDim;
+        linearLayers * stateCopies * convLength * linearValueHeads * linearValueDim;
       const linearConvElements = linearKeyConvElements + linearValueConvElements;
-      const linearRecurrentElements = linearLayers * linearValueHeads * linearKeyDim * linearValueDim;
+      const linearRecurrentElements =
+        linearLayers * stateCopies * linearValueHeads * linearKeyDim * linearValueDim;
       const byteGroups = [{ role: "kv", label: "Full-attention KV cache", heads: kvHeads, elements: fullElements }];
       const formulaRows = [
         {
@@ -404,14 +411,22 @@
           {
             name: "linear_conv_state_bytes",
             expression:
-              "sequences x linear_attention_layers x linear_conv_kernel_dim x (2 x linear_num_key_heads x linear_key_head_dim + linear_num_value_heads x linear_value_head_dim) x 2",
-            description: "Fixed-size Qwen linear-attention convolution state, estimated at BF16/FP16 precision.",
+              specTokens > 0
+                ? "sequences x linear_attention_layers x (1 + num_speculative_tokens) x (linear_conv_kernel_dim - 1 + num_speculative_tokens) x (2 x linear_num_key_heads x linear_key_head_dim + linear_num_value_heads x linear_value_head_dim) x 2"
+                : "sequences x linear_attention_layers x linear_conv_kernel_dim x (2 x linear_num_key_heads x linear_key_head_dim + linear_num_value_heads x linear_value_head_dim) x 2",
+            description: specTokens > 0
+              ? "Speculative decoding keeps 1 + N conv-state copies of length K - 1 + N, estimated at BF16/FP16 precision."
+              : "Fixed-size Qwen linear-attention convolution state, estimated at BF16/FP16 precision.",
           },
           {
             name: "linear_recurrent_state_bytes",
             expression:
-              "sequences x linear_attention_layers x linear_num_value_heads x linear_key_head_dim x linear_value_head_dim x 4",
-            description: "Fixed-size Qwen Gated DeltaNet recurrent state, estimated at FP32 precision.",
+              specTokens > 0
+                ? "sequences x linear_attention_layers x (1 + num_speculative_tokens) x linear_num_value_heads x linear_key_head_dim x linear_value_head_dim x 4"
+                : "sequences x linear_attention_layers x linear_num_value_heads x linear_key_head_dim x linear_value_head_dim x 4",
+            description: specTokens > 0
+              ? "Speculative decoding keeps 1 + N recurrent-state copies for rollback, still estimated at FP32 precision."
+              : "Fixed-size Qwen Gated DeltaNet recurrent state, estimated at FP32 precision.",
           },
           {
             name: "total_bytes",
@@ -443,17 +458,20 @@
           "full_kv_bytes = tokens * sequences * full_attention_layers * 2 * num_key_value_heads * head_dim * precision_bytes\ntotal_bytes = full_kv_bytes + optional_linear_attention_state_bytes",
         formulaRows,
         note: includeLinearAttentionState
-          ? "Qwen3.5/3.6 linear-attention state is sequence-level runtime state, not per-token KV. It does not grow linearly with tokens, so it matters more for short prompts and is diluted by full-attention KV at long context."
-          : "Qwen3.5/3.6 linear-attention recurrent/conv state is not ordinary per-token KV and is excluded by default. Enable the linear-attention state option to add a fixed runtime-state estimate.",
+          ? (specTokens > 0
+            ? "Speculative decoding raises the target model cache: the GDN state keeps 1 + N copies for rollback and each conv state widens to K - 1 + N, so linear-attention state grows with num_speculative_tokens even though it is not per-token KV."
+            : "Qwen linear-attention state is sequence-level runtime state, not per-token KV. It does not grow linearly with tokens, so it matters more for short prompts and is diluted by full-attention KV at long context.")
+          : "Qwen linear-attention recurrent/conv state is not ordinary per-token KV and is excluded by default. Enable the linear-attention state option to add a fixed runtime-state estimate.",
         byteGroups,
         components: [
           ["Main layers", layers],
           ["Full-attention layers", fullLayers, "Layers counted as ordinary token-linear KV cache."],
           ["Linear-attention layers", linearLayers, "Qwen Gated DeltaNet layers whose runtime state is optional and does not grow linearly with token count."],
           ["Linear state included", includeLinearAttentionState ? "Yes" : "No", "When enabled, adds fixed convolution and recurrent state for Qwen linear-attention layers."],
+          ...(specTokens > 0 ? [["Speculative tokens", specTokens, "Speculative decoding keeps 1 + N copies of the GDN conv/recurrent state for rollback, and widens each conv state to K - 1 + N positions."]] : []),
           ["Linear conv elements", linearConvElements, "Fixed convolution-state scalar elements per sequence before applying the 2-byte estimate."],
           ["Linear recurrent elements", linearRecurrentElements, "Fixed recurrent-state scalar elements per sequence before applying the 4-byte estimate."],
-          ["MTP layers not included", mtpLayers, "Qwen3.5/3.6 configs expose MTP layers, but the cache shape is not explicit enough to include defensibly."],
+          ["MTP layers not included", mtpLayers, "Qwen3.5/3.6/3.8 configs expose MTP layers, but the cache shape is not explicit enough to include defensibly."],
           ["Per-token elements", elementsPerToken, "Ordinary full-attention KV scalar elements per token before multiplying by precision bytes."],
           ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "linear_attention_layers", "num_key_value_heads", "head_dim", "linear_num_key_heads", "linear_key_head_dim", "linear_num_value_heads", "linear_value_head_dim", "linear_conv_kernel_dim"])],
         ],
@@ -532,6 +550,43 @@
           ["Full-attention elements", fullElements, "Full-attention scalar KV elements before applying precision bytes."],
           ["Sliding-window elements", slidingElements, "Sliding-window scalar KV elements before applying precision bytes."],
           ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "sliding_attention_layers", "num_key_value_heads", "num_global_key_value_heads", "head_dim", "global_head_dim", "v_head_dim", "global_v_head_dim", "swa_num_key_value_heads", "swa_head_dim", "swa_v_head_dim", "sliding_window"])],
+        ],
+      };
+    }
+
+    if (formula === "sliding_gqa") {
+      const layers = getField(model, "num_hidden_layers");
+      const kvHeads = getField(model, "num_key_value_heads");
+      const headDim = getField(model, "head_dim");
+      const slidingWindow = getField(model, "sliding_window");
+      const retainedTokens = Math.min(tokens, slidingWindow);
+      const elements = retainedTokens * layers * 2 * kvHeads * headDim;
+      return {
+        elementsPerSequence: elements,
+        elementsPerToken: elements / tokens,
+        formulaLabel: FORMULA_LABELS[formula],
+        formulaText:
+          "sliding_kv_bytes = min(tokens, sliding_window) * sequences * layers * 2 * num_key_value_heads * head_dim * precision_bytes",
+        formulaRows: [
+          {
+            name: "sliding_kv_bytes",
+            expression: "min(tokens, sliding_window) x sequences x layers x 2 x num_key_value_heads x head_dim x precision_bytes",
+            description: "Sliding-window-only attention retains at most sliding_window tokens of KV per sequence.",
+          },
+          {
+            name: "total_bytes",
+            expression: "sliding_kv_bytes",
+            description: "Every layer uses sliding-window attention, so the window-capped KV payload is the whole cache.",
+          },
+        ],
+        note: "Production estimate for a sliding-window-only attention model; each layer retains at most sliding_window tokens of KV per sequence.",
+        byteGroups: [{ role: "kv", label: "Sliding-window KV cache", heads: kvHeads, elements }],
+        components: [
+          ["Main layers", layers],
+          ["Sliding window", slidingWindow, "Per-layer KV retention cap in tokens."],
+          ["Retained sliding tokens", retainedTokens, "min(tokens, sliding_window) for each attention layer."],
+          ["Per-token elements", layers * 2 * kvHeads * headDim, "Scalar KV elements per retained token before multiplying by precision bytes."],
+          ["Model fields", fieldList(model, ["num_hidden_layers", "num_key_value_heads", "head_dim", "sliding_window"])],
         ],
       };
     }
@@ -697,6 +752,51 @@
     throw new Error(`Unsupported formula: ${formula}`);
   }
 
+  function mergeSpeculativeDraft(elementPlan, draftModel, tokens) {
+    const draftPlan = calculateElementsPerSequence(draftModel, tokens, {
+      includeDraftKvCache: false,
+      includeLinearAttentionState: false,
+    });
+    const draftLabel = (draftModel && (draftModel.repo_id || draftModel.label || draftModel.id)) || "speculative draft";
+    const draftHref =
+      draftModel && typeof draftModel.source_url === "string"
+        ? draftModel.source_url.replace(/\/raw\/[^\/]+\/.*$/, "")
+        : undefined;
+    const draftGroups = (draftPlan.byteGroups || []).map((group) => ({
+      ...group,
+      label: `Draft ${group.label || "KV cache"}`,
+    }));
+    const draftNames = (draftPlan.formulaRows || []).map((row) => row.name);
+    const draftRows = (draftPlan.formulaRows || []).map((row) => {
+      let expression = row.expression;
+      draftNames.forEach((name) => {
+        expression = expression.replace(new RegExp(`\\b${name}\\b`, "g"), `draft_${name}`);
+      });
+      expression = expression.replace(/\bnum_key_value_heads\b/g, "draft_num_key_value_heads");
+      return {
+        name: `draft_${row.name}`,
+        expression,
+        description: `[${draftLabel}] ${row.description || ""}`.trim(),
+      };
+    });
+    return {
+      ...elementPlan,
+      elementsPerSequence: elementPlan.elementsPerSequence + draftPlan.elementsPerSequence,
+      elementsPerToken: elementPlan.elementsPerToken + draftPlan.elementsPerToken,
+      formulaLabel: `${elementPlan.formulaLabel} + speculative draft`,
+      formulaRows: (elementPlan.formulaRows || []).concat(draftRows),
+      note: `${elementPlan.note} Speculative draft cache for ${draftLabel} is included.`,
+      byteGroups: (elementPlan.byteGroups || []).concat(draftGroups),
+      components: elementPlan.components,
+      speculative: {
+        label: draftLabel,
+        href: draftHref,
+        description: "Speculative decoding draft model whose KV cache is added on top of the target model.",
+        components: draftPlan.components,
+      },
+    };
+  }
+
   function bytesPerElementForGroup(precision, role) {
     if ((role === "kv" || role === "attention") && Number.isFinite(precision.kvBytesPerElement)) {
       return precision.kvBytesPerElement;
@@ -783,10 +883,14 @@
           indexerBytesPerElement: indexerPrecision.bytesPerElement,
         }
       : precision;
-    const elementPlan = calculateElementsPerSequence(model, tokens, {
+    let elementPlan = calculateElementsPerSequence(model, tokens, {
       includeDraftKvCache: hasDraftKvCache(model) && toBoolean(input.includeDraftKvCache),
       includeLinearAttentionState: hasLinearAttentionState(model) && toBoolean(input.includeLinearAttentionState),
+      specTokens: input.specTokens,
     });
+    if (input.speculativeModel) {
+      elementPlan = mergeSpeculativeDraft(elementPlan, input.speculativeModel, tokens);
+    }
     const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision).map((group) => {
       const distribution = distributeHeads(group.heads, tensorParallel);
       return {

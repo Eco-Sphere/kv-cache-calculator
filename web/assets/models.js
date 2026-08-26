@@ -363,6 +363,33 @@
     },
     {
       "default_tokens": 1024,
+      "family": "Qwen3.8",
+      "fields": {
+        "full_attention_layers": 16,
+        "head_dim": 256,
+        "linear_attention_layers": 48,
+        "linear_conv_kernel_dim": 4,
+        "linear_key_head_dim": 128,
+        "linear_num_key_heads": 16,
+        "linear_num_value_heads": 48,
+        "linear_value_head_dim": 128,
+        "mtp_num_hidden_layers": 1,
+        "num_attention_heads": 24,
+        "num_hidden_layers": 64,
+        "num_key_value_heads": 4
+      },
+      "formula": "qwen_linear_full_hybrid",
+      "id": "qwen3.8-27b",
+      "label": "Qwen3.8-27B",
+      "max_position_embeddings": 262144,
+      "source_retrieved_at": "2026-08-24",
+      "source_url": "https://huggingface.co/Qwen/Qwen3.8-27B/raw/main/config.json",
+      "speculative_model_ids": [
+        "qwen3.8-27b-dflash2"
+      ]
+    },
+    {
+      "default_tokens": 1024,
       "family": "Qwen3.6",
       "fields": {
         "full_attention_layers": 16,
@@ -1232,6 +1259,31 @@
       "bytes_per_element": 0.5,
       "id": "fp4_int4",
       "label": "FP4 / INT4"
+    }
+  ],
+  "speculative_models": [
+    {
+      "default_tokens": 1024,
+      "family": "Qwen3.8",
+      "fields": {
+        "default_speculative_tokens": 7,
+        "dflash_block_size": 8,
+        "head_dim": 128,
+        "num_attention_heads": 32,
+        "num_hidden_layers": 5,
+        "num_key_value_heads": 8,
+        "sliding_window": 2048
+      },
+      "formula": "sliding_gqa",
+      "id": "qwen3.8-27b-dflash2",
+      "label": "Qwen3.8-27B-DFlash2",
+      "max_position_embeddings": 262144,
+      "repo_id": "z-lab/Qwen3.8-27B-DFlash2",
+      "source_retrieved_at": "2026-08-24",
+      "source_url": "https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2/raw/main/config.json",
+      "target_model_ids": [
+        "qwen3.8-27b"
+      ]
     }
   ]
 };

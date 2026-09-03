@@ -27,7 +27,7 @@
       "bytes_per_element": 0.5,
       "id": "fp4_int4",
       "label": "FP4 / INT4"
-    }
+    },
   ],
   "metadata": {
     "note": "Curated from official Hugging Face model config/source files and serving-engine references. Values describe KV cache capacity planning, not model weights or activation memory.",
@@ -1242,6 +1242,44 @@
       "max_position_embeddings": 1048576,
       "source_retrieved_at": "2026-06-23",
       "source_url": "https://huggingface.co/MiniMaxAI/MiniMax-M3/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "Step",
+      "fields": {
+        "full_attention_layers": 12,
+        "head_dim": 128,
+        "num_attention_heads": 64,
+        "num_hidden_layers": 45,
+        "num_key_value_heads": 8,
+        "sliding_attention_layers": 33,
+        "sliding_window": 512
+      },
+      "formula": "mixed_full_sliding_gqa",
+      "id": "step-3.5-flash",
+      "label": "Step 3.5 Flash",
+      "max_position_embeddings": 262144,
+      "source_retrieved_at": "2026-09-02",
+      "source_url": "https://huggingface.co/stepfun-ai/Step-3.5-Flash/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "Step",
+      "fields": {
+        "full_attention_layers": 12,
+        "head_dim": 128,
+        "num_attention_heads": 64,
+        "num_hidden_layers": 45,
+        "num_key_value_heads": 8,
+        "sliding_attention_layers": 33,
+        "sliding_window": 512
+      },
+      "formula": "mixed_full_sliding_gqa",
+      "id": "step-3.7-flash",
+      "label": "Step 3.7 Flash",
+      "max_position_embeddings": 262144,
+      "source_retrieved_at": "2026-09-02",
+      "source_url": "https://huggingface.co/stepfun-ai/Step-3.7-Flash/raw/main/config.json"
     }
   ],
   "precision_options": [

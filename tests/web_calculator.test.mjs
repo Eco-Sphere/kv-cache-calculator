@@ -24,13 +24,23 @@ function inputFor(item, overrides = {}) {
   };
 }
 
-test("includes all 53 upstream models, nine visible families, and seven formulas", () => {
-  assert.equal(data.models.length, 53);
+test("includes all catalog models, ten visible families, and seven formulas", () => {
+  assert.equal(data.models.length, 55);
   assert.deepEqual(app.families(data.models), [
-    "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen",
+    "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen", "Step",
   ]);
   assert.equal(new Set(data.models.map((item) => item.formula)).size, 7);
   assert.equal(app.modelsForFamily(data.models, "Qwen").length, 24);
+});
+
+test("Step3.5 and Step3.7 use the same mixed GQA cache layout", () => {
+  for (const id of ["step-3.5-flash", "step-3.7-flash"]) {
+    const result = app.calculateView(model(id), inputFor(model(id), {
+      tokens: 1000000, precision: "fp8_int8", tensorParallel: 1,
+    }), data);
+    assert.equal(result.totalBytes, 24610603008);
+    assert.equal(result.elementPlan.elementsPerToken, 24610603008 / 1000000);
+  }
 });
 
 test("every model calculates finite values at every supported TP size", () => {

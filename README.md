@@ -12,7 +12,7 @@
 python3 -m http.server 8000 --directory web
 ```
 
-然后访问 `http://localhost:8000`。网页内置 10 个模型家族、55 个模型，并支持 TP、KV/Indexer 精度、Draft KV、Qwen Linear Attention runtime state 和 Speculative model（含 speculative tokens 对 target model GDN state 的扩容）等模型相关选项。
+然后访问 `http://localhost:8000`。网页内置 10 个模型家族、56 个模型，并支持 TP、KV/Indexer 精度、Draft KV、Qwen Linear Attention runtime state 和 Speculative model（含 speculative tokens 对 target model GDN state 的扩容）等模型相关选项。
 
 ### 网页支持范围
 
@@ -25,9 +25,9 @@ python3 -m http.server 8000 --directory web
 - Cohere：Command R、R+、R7B、A、A Plus
 - MiMo：MiMo-V2.5、MiMo-V2.5-Pro
 - MiniMax：M2、M2.1、M2.5、M2.7、M3
-- Step：Step 3.5 Flash、Step 3.7 Flash
+- Step：Step 3.5 Flash、Step 3.7 Flash、Step 5 Preview（Sparse GQA，含 8-token 块压缩的 FP8 索引器缓存）
 
-网页覆盖 Standard MHA/GQA、MLA、DSA/MLA + Indexer、Qwen Linear/Full Hybrid、Full/Sliding GQA、MiniMax MSA 和 DeepSeek V4 Hybrid 七套容量公式。模型数据和公式来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+网页覆盖 Standard MHA/GQA、MLA、DSA/MLA + Indexer、Qwen Linear/Full Hybrid、Full/Sliding GQA（可选 Sparse Indexer）、MiniMax MSA 和 DeepSeek V4 Hybrid 七套容量公式。模型数据和公式来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 ## 测试
 

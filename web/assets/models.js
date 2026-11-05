@@ -1280,7 +1280,38 @@
       "max_position_embeddings": 262144,
       "source_retrieved_at": "2026-09-02",
       "source_url": "https://huggingface.co/stepfun-ai/Step-3.7-Flash/raw/main/config.json"
-    }
+    },
+
+    {
+      "default_tokens": 1024,
+      "family": "Step",
+      "fields": {
+        "draft_full_attention_layers": 0,
+        "draft_indexer_layers": 0,
+        "draft_sliding_attention_layers": 3,
+        "full_attention_layers": 23,
+        "head_dim": 192,
+        "index_block_size": 8,
+        "index_head_dim": 256,
+        "index_n_heads": 16,
+        "index_num_key_heads": 1,
+        "index_topk": 512,
+        "indexer_fixed_precision_id": "fp8_int8",
+        "indexer_full_layers": 23,
+        "num_attention_heads": 64,
+        "num_hidden_layers": 92,
+        "num_key_value_heads": 4,
+        "num_nextn_predict_layers": 3,
+        "sliding_attention_layers": 69,
+        "sliding_window": 512
+      },
+      "formula": "mixed_full_sliding_gqa",
+      "id": "step-5-preview",
+      "label": "Step 5 Preview",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-05",
+      "source_url": "https://huggingface.co/stepfun-ai/Step-5-Preview/raw/main/config.json"
+    },
   ],
   "precision_options": [
     {

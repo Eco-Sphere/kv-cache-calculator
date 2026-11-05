@@ -25,7 +25,7 @@ function inputFor(item, overrides = {}) {
 }
 
 test("includes all catalog models, ten visible families, and seven formulas", () => {
-  assert.equal(data.models.length, 55);
+  assert.equal(data.models.length, 56);
   assert.deepEqual(app.families(data.models), [
     "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen", "Step",
   ]);
@@ -41,6 +41,91 @@ test("Step3.5 and Step3.7 use the same mixed GQA cache layout", () => {
     assert.equal(result.totalBytes, 24610603008);
     assert.equal(result.elementPlan.elementsPerToken, 24610603008 / 1000000);
   }
+});
+
+test("Step 5 Preview prices 23 full + 69 sliding layers plus the FP8 indexer cache", () => {
+  const item = model("step-5-preview");
+  assert.equal(item.family, "Step");
+  assert.equal(item.formula, "mixed_full_sliding_gqa");
+  assert.equal(item.fields.num_hidden_layers, 92);
+  assert.equal(item.fields.full_attention_layers + item.fields.sliding_attention_layers, 92);
+  assert.equal(item.fields.num_key_value_heads, 4);
+  assert.equal(item.fields.sliding_window, 512);
+  // 索引器：8 个 token 压成一个 256 维摘要，官方实现固定 FP8。
+  assert.equal(item.fields.index_block_size, 8);
+  assert.equal(item.fields.index_head_dim, 256);
+  assert.equal(app.defaultIndexerPrecision(item), "fp8_int8");
+
+  const result = app.calculateView(item, inputFor(item, {
+    tokens: 1000000,
+    precision: "bf16_fp16",
+    indexerPrecision: "fp8_int8",
+    tensorParallel: 1,
+  }), data);
+
+  // full: 1e6 x 23 x 4 x (192+192) x 2 B
+  const fullBytes = 1000000 * 23 * 4 * 384 * 2;
+  // sliding: min(1e6, 512) x 69 x 4 x 384 x 2 B
+  const slidingBytes = 512 * 69 * 4 * 384 * 2;
+  // indexer: ceil(1e6 / 8) x 23 x 1 x 256 x 1 B
+  const indexerBytes = 125000 * 23 * 1 * 256 * 1;
+  assert.equal(result.kvBytes, fullBytes + slidingBytes);
+  assert.equal(result.indexerBytes, indexerBytes);
+  assert.equal(result.totalBytes, fullBytes + slidingBytes + indexerBytes);
+  assert.equal(result.totalBytes, 71500527616);
+  assert.match(result.elementPlan.formulaLabel, /indexer/);
+});
+
+test("Step 5 Preview indexer cache is priced independently of the KV precision", () => {
+  const item = model("step-5-preview");
+  const fp8 = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, precision: "bf16_fp16", indexerPrecision: "fp8_int8", tensorParallel: 1,
+  }), data);
+  const fp4 = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, precision: "bf16_fp16", indexerPrecision: "fp4_int4", tensorParallel: 1,
+  }), data);
+  assert.equal(fp8.indexerBytes, 125000 * 23 * 256);
+  assert.equal(fp4.indexerBytes, 125000 * 23 * 256 / 2);
+  assert.equal(fp8.totalBytes - fp4.totalBytes, 125000 * 23 * 256 / 2);
+
+  const fp8Kv = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, precision: "fp8_int8", indexerPrecision: "fp8_int8", tensorParallel: 1,
+  }), data);
+  assert.equal(fp8Kv.kvBytes * 2, fp8.kvBytes);
+  assert.equal(fp8Kv.indexerBytes, fp8.indexerBytes);
+});
+
+test("Step 5 Preview shards 4 KV heads across TP and replicates the one-head indexer", () => {
+  const item = model("step-5-preview");
+  assert.deepEqual(app.validTpSizes(item), [1, 2, 4]);
+  const tp4 = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, precision: "bf16_fp16", indexerPrecision: "fp8_int8", tensorParallel: 4,
+  }), data);
+  // KV / 4, indexer fully replicated on every rank.
+  assert.equal(tp4.perDeviceBytes, (71500527616 - 736000000) / 4 + 736000000);
+  assert.equal(tp4.perDeviceBytes, 18427131904);
+  assert.equal(tp4.allDeviceBytes, 73708527616);
+
+  // 官方部署是 TP=8：4 个 KV 组在两张卡上重复，每卡仍是 1/4 KV。核心层支持该布局，
+  // 只是网页下拉按 KV 头数取整，因此这里直接调用核心。
+  const tp8 = core.calculate(item, {
+    tokens: 1000000, sequences: 1, tensorParallel: 8, precision: "bf16_fp16", indexerPrecision: "fp8_int8",
+  });
+  assert.equal(tp8.perDeviceBytes, tp4.perDeviceBytes);
+  assert.equal(tp8.allDeviceBytes, tp4.perDeviceBytes * 8);
+});
+
+test("Step 5 Preview MTP layers are sliding and add no indexer cache", () => {
+  const item = model("step-5-preview");
+  const withoutDraft = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, tensorParallel: 1, includeDraftKvCache: false,
+  }), data);
+  const withDraft = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, tensorParallel: 1, includeDraftKvCache: true,
+  }), data);
+  // 3 层 draft 全部是 sliding_attention：只增加 3 x 512 个 token 的 KV，索引器不变。
+  assert.equal(withDraft.totalBytes - withoutDraft.totalBytes, 3 * 512 * 4 * 384 * 2);
+  assert.equal(withDraft.indexerBytes, withoutDraft.indexerBytes);
 });
 
 test("every model calculates finite values at every supported TP size", () => {

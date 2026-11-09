@@ -25,7 +25,7 @@ function inputFor(item, overrides = {}) {
 }
 
 test("includes all catalog models, ten visible families, and seven formulas", () => {
-  assert.equal(data.models.length, 56);
+  assert.equal(data.models.length, 59);
   assert.deepEqual(app.families(data.models), [
     "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen", "Step",
   ]);
@@ -126,6 +126,52 @@ test("Step 5 Preview MTP layers are sliding and add no indexer cache", () => {
   // 3 层 draft 全部是 sliding_attention：只增加 3 x 512 个 token 的 KV，索引器不变。
   assert.equal(withDraft.totalBytes - withoutDraft.totalBytes, 3 * 512 * 4 * 384 * 2);
   assert.equal(withDraft.indexerBytes, withoutDraft.indexerBytes);
+});
+
+test("GLM-5.3 keeps 21 indexer layers out of 78 and prices MLA KV", () => {
+  const item = model("glm-5.3");
+  assert.equal(item.family, "GLM");
+  assert.equal(item.formula, "dsa_mla");
+  assert.equal(item.fields.num_hidden_layers, 78);
+  assert.equal(item.fields.indexer_full_layers, 21);
+  assert.equal(item.fields.indexer_shared_layers, 57);
+
+  const result = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, precision: "bf16_fp16", indexerPrecision: "fp8_int8", tensorParallel: 1,
+  }), data);
+  // KV: 78 层 x (kv_lora_rank 512 + qk_rope 64) x 1e6 token x 2 B
+  assert.equal(result.kvBytes, 78 * 576 * 1000000 * 2);
+  // Indexer：21 层（full）x 1 个 K 头 x 128 维 x 1e6 token x 1 B
+  assert.equal(result.indexerBytes, 21 * 1 * 128 * 1000000);
+  assert.equal(result.totalBytes, 92544000000);
+});
+
+test("GLM-5.3-Flash puts an indexer on all 45 layers", () => {
+  const item = model("glm-5.3-flash");
+  assert.equal(item.fields.num_hidden_layers, 45);
+  assert.equal(item.fields.indexer_full_layers, 45);
+  assert.equal(item.fields.indexer_shared_layers, 0);
+  const result = app.calculateView(item, inputFor(item, {
+    tokens: 1000000, precision: "bf16_fp16", indexerPrecision: "fp8_int8", tensorParallel: 1,
+  }), data);
+  assert.equal(result.kvBytes, 45 * (512 + 0) * 1000000 * 2);
+  assert.equal(result.indexerBytes, 45 * 128 * 1000000);
+  assert.equal(result.totalBytes, 51840000000);
+});
+
+test("MiniMax M3.1 Flash is sparse on every layer and pins its indexer to BF16", () => {
+  const item = model("minimax-m3.1-flash");
+  assert.equal(item.formula, "minimax_msa");
+  assert.equal(item.fields.full_attention_layers, 0);
+  assert.equal(item.fields.sparse_attention_layers, 60);
+  assert.equal(app.defaultIndexerPrecision(item), "bf16_fp16");
+
+  const result = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 1 }), data);
+  // KV：60 层 x 2 x 4 个 KV 头 x 128 维 x 1e6 token x 2 B
+  assert.equal(result.kvBytes, 60 * 2 * 4 * 128 * 1000000 * 2);
+  // Indexer：60 层 x 1 个 K 头 x 128 维 x 1e6 token x 2 B（BF16）
+  assert.equal(result.indexerBytes, 60 * 128 * 1000000 * 2);
+  assert.equal(result.totalBytes, 138240000000);
 });
 
 test("every model calculates finite values at every supported TP size", () => {

@@ -60,6 +60,10 @@
   }
 
   function validTpSizes(model) {
+    // V4.1 的 KV 是整页复制的物理页缓存，不按 KV 头切分，因此任意 TP 均合法。
+    if (model.formula === "dsv41_paged") {
+      return [1, 2, 4, 8, 16, 32];
+    }
     const kvHeads = Math.max(1, Math.floor(numericField(model, "num_key_value_heads", 1)));
     return Array.from({ length: kvHeads }, function (_, index) {
       return index + 1;

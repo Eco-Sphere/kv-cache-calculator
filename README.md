@@ -12,7 +12,7 @@
 python3 -m http.server 8000 --directory web
 ```
 
-然后访问 `http://localhost:8000`。网页内置 10 个模型家族、59 个模型，并支持 TP、KV/Indexer 精度、Draft KV、Qwen Linear Attention runtime state 和 Speculative model（含 speculative tokens 对 target model GDN state 的扩容）等模型相关选项。
+然后访问 `http://localhost:8000`。网页内置 10 个模型家族、61 个模型，并支持 TP、KV/Indexer 精度、Draft KV、Qwen Linear Attention runtime state 和 Speculative model（含 speculative tokens 对 target model GDN state 的扩容）等模型相关选项。
 
 ### 网页支持范围
 

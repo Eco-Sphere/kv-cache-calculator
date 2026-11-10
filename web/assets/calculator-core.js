@@ -662,6 +662,44 @@
       };
     }
 
+    // DeepSeek V4.1 的 KV 由 vllm-ascend 的"物理页"模型决定：每个 block 的页大小
+    // 已经把 MLA 压缩 KV、indexer K、SWA 窗口、compressor 状态合并为 max() 后的单页。
+    // 数值取自 vllm-ascend 的 production 布局测试
+    // (tests/ut/models/test_deepseek_v41_cache.py::test_production_layout_matches_design)：
+    // block_size=128 时 4 个 kv_source 槽的页为 [131072, 131072, 131072, 147712]，合计 540928 字节
+    // （该测试用 candidate_topk_blocks=16）；线上配置 candidate_topk_blocks=2048，candidate 缓冲多出
+    // (2048-16)×8×2 ≈ 32512 字节，故取 573440 字节/block，对应 vllm-ascend 文档的
+    // "1M token ≈ 4.18 GiB/device"。
+    if (formula === "dsv41_paged") {
+      const blockTokens = getField(model, "block_tokens");
+      const pageBytes = getField(model, "page_bytes_per_block");
+      const blocksPerSequence = Math.ceil(tokens / blockTokens);
+      const kvBytes = blocksPerSequence * pageBytes;
+      const totalBytes = kvBytes;
+      return {
+        bytesAlready: true,
+        elementsPerSequence: blocksPerSequence * pageBytes,
+        elementsPerToken: pageBytes / blockTokens,
+        bytesPerElement: null,
+        components: [
+          {
+            expression: "ceil(tokens / block_tokens) x sequences x page_bytes_per_block",
+            bytes: kvBytes,
+            label: "KV cache（V4.1 物理页）",
+          },
+        ],
+        indexerBytes: 0,
+        indexerElements: 0,
+        indexerElementsPerToken: 0,
+        kvBytes,
+        perDeviceBytes: kvBytes,
+        totalBytes,
+        totalElements: null,
+        kvElements: null,
+        kvElementsPerToken: null,
+      };
+    }
+
     if (formula === "minimax_msa") {
       const layers = getField(model, "num_hidden_layers");
       const fullLayers = getField(model, "full_attention_layers");
@@ -962,7 +1000,17 @@
     if (input.speculativeModel) {
       elementPlan = mergeSpeculativeDraft(elementPlan, input.speculativeModel, tokens);
     }
-    const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision).map((group) => {
+    // dsv41_paged 直接按物理页给出字节数（页内已含各段 dtype），不再乘精度字节。
+    const effectiveCachePrecision = elementPlan.bytesAlready
+      ? {
+          label: precision.label,
+          bytesPerElement: 1,
+          kvBytesPerElement: 1,
+          indexerBytesPerElement: 1,
+        }
+      : cachePrecision;
+
+    const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, effectiveCachePrecision).map((group) => {
       const distribution = distributeHeads(group.heads, tensorParallel);
       return {
         ...group,

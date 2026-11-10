@@ -124,6 +124,46 @@
       "default_tokens": 1024,
       "family": "DeepSeek",
       "fields": {
+        "block_tokens": 128,
+        "compress_ratios": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        "index_source_layers": 8,
+        "kv_source_layers": 4,
+        "num_hidden_layers": 40,
+        "num_key_value_heads": 1,
+        "page_bytes_per_block": 573440,
+        "sliding_window": 128
+      },
+      "formula": "dsv41_paged",
+      "id": "deepseek-v4.1-flash",
+      "label": "DeepSeek V4.1 Flash",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-10",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "DeepSeek",
+      "fields": {
+        "block_tokens": 128,
+        "compress_ratios": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        "index_source_layers": 8,
+        "kv_source_layers": 4,
+        "num_hidden_layers": 40,
+        "num_key_value_heads": 1,
+        "page_bytes_per_block": 573440,
+        "sliding_window": 128
+      },
+      "formula": "dsv41_paged",
+      "id": "deepseek-v4.1-flash-1017",
+      "label": "DeepSeek V4.1 Flash 1017",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-10",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "DeepSeek",
+      "fields": {
         "compress_ratios": [
           0,
           0,

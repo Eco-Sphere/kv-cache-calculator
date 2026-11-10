@@ -24,12 +24,12 @@ function inputFor(item, overrides = {}) {
   };
 }
 
-test("includes all catalog models, ten visible families, and seven formulas", () => {
-  assert.equal(data.models.length, 59);
+test("includes all catalog models, ten visible families, and eight formulas", () => {
+  assert.equal(data.models.length, 61);
   assert.deepEqual(app.families(data.models), [
     "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen", "Step",
   ]);
-  assert.equal(new Set(data.models.map((item) => item.formula)).size, 7);
+  assert.equal(new Set(data.models.map((item) => item.formula)).size, 8);
   assert.equal(app.modelsForFamily(data.models, "Qwen").length, 24);
 });
 
@@ -174,6 +174,28 @@ test("MiniMax M3.1 Flash is sparse on every layer and pins its indexer to BF16",
   assert.equal(result.totalBytes, 138240000000);
 });
 
+test("DeepSeek V4.1 Flash prices its KV by the vllm-ascend physical page", () => {
+  const item = model("deepseek-v4.1-flash");
+  assert.equal(item.family, "DeepSeek");
+  assert.equal(item.formula, "dsv41_paged");
+  assert.equal(item.fields.block_tokens, 128);
+  assert.equal(item.fields.page_bytes_per_block, 573440);
+
+  const result = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 4 }), data);
+  // 1M token = ceil(1e6 / 128) = 7813 个物理页 x 573440 字节
+  assert.equal(result.totalBytes, 7813 * 573440);
+  // 与 vllm-ascend 文档的 4.18 GiB/device 对齐（-0.2%）
+  assert.ok(Math.abs(result.totalBytes / (4.18 * 2 ** 30) - 1) < 0.01);
+});
+
+test("DeepSeek V4.1 Flash 1017 shares the page model and is TP-invariant", () => {
+  const item = model("deepseek-v4.1-flash-1017");
+  const a = app.calculateView(item, inputFor(item, { tokens: 262144, tensorParallel: 1 }), data);
+  const b = app.calculateView(item, inputFor(item, { tokens: 262144, tensorParallel: 8 }), data);
+  assert.equal(a.totalBytes, b.totalBytes);
+  assert.equal(a.totalBytes, Math.ceil(262144 / 128) * 573440);
+});
+
 test("every model calculates finite values at every supported TP size", () => {
   for (const item of data.models) {
     for (const tp of app.validTpSizes(item)) {
@@ -181,7 +203,10 @@ test("every model calculates finite values at every supported TP size", () => {
       assert.ok(Number.isFinite(result.perDeviceBytes) && result.perDeviceBytes > 0, item.id);
       assert.ok(Number.isFinite(result.allDeviceBytes) && result.allDeviceBytes > 0, item.id);
       assert.equal(result.allDeviceBytes, result.perDeviceBytes * tp, item.id);
-      assert.equal(item.fields.num_key_value_heads % tp, 0, item.id);
+      // dsv41_paged 按整页复制，KV 不按头切分，TP 无需整除 KV 头数。
+      if (item.formula !== "dsv41_paged") {
+        assert.equal(item.fields.num_key_value_heads % tp, 0, item.id);
+      }
     }
   }
 });

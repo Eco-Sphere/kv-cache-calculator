@@ -674,29 +674,49 @@
       const blockTokens = getField(model, "block_tokens");
       const pageBytes = getField(model, "page_bytes_per_block");
       const blocksPerSequence = Math.ceil(tokens / blockTokens);
-      const kvBytes = blocksPerSequence * pageBytes;
-      const totalBytes = kvBytes;
+      const bytesPerSequence = blocksPerSequence * pageBytes;
       return {
-        bytesAlready: true,
-        elementsPerSequence: blocksPerSequence * pageBytes,
-        elementsPerToken: pageBytes / blockTokens,
-        bytesPerElement: null,
+        byteGroups: [
+          {
+            role: "cache",
+            heads: 1,
+            label: "KV cache（V4.1 物理页）",
+            bytesPerSequence,
+          },
+        ],
         components: [
           {
-            expression: "ceil(tokens / block_tokens) x sequences x page_bytes_per_block",
-            bytes: kvBytes,
+            expression: "ceil(tokens / block_tokens) x page_bytes_per_block",
+            bytes: bytesPerSequence,
             label: "KV cache（V4.1 物理页）",
           },
         ],
-        indexerBytes: 0,
-        indexerElements: 0,
-        indexerElementsPerToken: 0,
-        kvBytes,
-        perDeviceBytes: kvBytes,
-        totalBytes,
-        totalElements: null,
-        kvElements: null,
-        kvElementsPerToken: null,
+        elementsPerSequence: 0,
+        elementsPerToken: 0,
+        formulaLabel: FORMULA_LABELS[formula],
+        formulaRows: [
+          {
+            name: "blocks_per_sequence",
+            expression: "ceil(tokens / block_tokens)",
+            description: "每个序列占用的物理页数量，block_tokens 为页覆盖的 token 数（V4.1 为 128）。",
+          },
+          {
+            name: "bytes_per_sequence",
+            expression: "blocks_per_sequence x page_bytes_per_block",
+            description: "单序列 KV 字节数；页大小由 vllm-ascend 的整页缓存决定（压缩 MLA + indexer + SWA + compressor 状态取 max）。",
+          },
+          {
+            name: "total_bytes",
+            expression: "bytes_per_sequence x sequences",
+            description: "所有并发序列的 KV 总量；物理页在 TP 间复制，因此单卡字节数等于该值。",
+          },
+        ],
+        formulaText:
+          "blocks_per_sequence = ceil(tokens / block_tokens)\nbytes_per_sequence = blocks_per_sequence x page_bytes_per_block\ntotal_bytes = bytes_per_sequence x sequences",
+        note:
+          "页模型取自 vllm-ascend：block_size=128 时 4 个 kv_source 槽页大小为 [131072, 131072, 131072, 147712]（测试值 540928），"
+          + "线上 candidate_topk_blocks=2048 再多出约 32512 字节，故取 573440 字节/页；1M token 约 4.17 GiB/device，"
+          + "与 vllm-ascend DeepSeek-V4.1-Flash 部署文档的 4.18 GiB 一致。",
       };
     }
 

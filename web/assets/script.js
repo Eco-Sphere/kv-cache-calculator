@@ -60,6 +60,10 @@
   }
 
   function validTpSizes(model) {
+    // V4.1 的 KV 是整页复制的物理页缓存，不按 KV 头切分，因此任意 TP 均合法。
+    if (model.formula === "dsv41_paged") {
+      return [1, 2, 4, 8, 16, 32];
+    }
     const kvHeads = Math.max(1, Math.floor(numericField(model, "num_key_value_heads", 1)));
     return Array.from({ length: kvHeads }, function (_, index) {
       return index + 1;
@@ -131,13 +135,20 @@
   }
 
   function defaultIndexerPrecision(model) {
+    const fixed = model && model.fields && model.fields.indexer_fixed_precision_id;
+    if (typeof fixed === "string") {
+      return fixed;
+    }
     return model.formula === "deepseek_v4_hybrid" ? "fp4_int4" : "bf16_fp16";
   }
 
   function modelForCalculation(model) {
-    if (model.id !== "minimax-m3") {
+    if (!model || !model.fields || !Object.hasOwn(model.fields, "indexer_fixed_precision_id")) {
       return model;
     }
+    // ``indexer_fixed_precision_id`` expresses the precision a model ships with, not a
+    // hard cap: the calculator still lets users price other indexer precisions, so the
+    // pin is removed from the copy handed to the core and used only as the default.
     const fields = Object.assign({}, model.fields);
     delete fields.indexer_fixed_precision_id;
     return Object.assign({}, model, { fields: fields });
@@ -369,6 +380,7 @@
       return expression
         .replace(/tokens x sequences x /g, "tokens x ")
         .replace(/min\(tokens, sliding_window\) x sequences x /g, "min(tokens, sliding_window) x ")
+        .replace(/ceil\(tokens \/ index_block_size\) x sequences x /g, "ceil(tokens / index_block_size) x ")
         .replace(/^sequences x /, "");
     }
     function localHeads(expression, field) {
@@ -411,6 +423,9 @@
       if (formula === "mixed_full_sliding_gqa") {
         expression = localHeads(expression, "full_kv_heads");
         expression = localHeads(expression, "sliding_kv_heads");
+        if (row.name === "indexer_bytes") {
+          expression = localHeads(expression, "index_num_key_heads");
+        }
       }
       if (formula === "minimax_msa" && row.name === "kv_bytes") {
         expression = localHeads(expression, "num_key_value_heads");
@@ -439,7 +454,9 @@
         ? "full_kv_bytes + linear_conv_state_bytes + linear_recurrent_state_bytes"
         : "full_kv_bytes";
     } else if (formula === "mixed_full_sliding_gqa") {
-      terms = "full_kv_bytes + sliding_kv_bytes";
+      terms = perDeviceRows.some(function (row) { return row.name === "indexer_bytes"; })
+        ? "full_kv_bytes + sliding_kv_bytes + indexer_bytes"
+        : "full_kv_bytes + sliding_kv_bytes";
     } else {
       terms = "kv_bytes + indexer_bytes";
     }

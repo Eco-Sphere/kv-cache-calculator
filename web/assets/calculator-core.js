@@ -508,49 +508,120 @@
       );
       const slidingWindow = getField(model, "sliding_window");
       const retainedSlidingTokens = Math.min(tokens, slidingWindow);
-      const fullElements = tokens * fullLayers * fullKvHeads * (fullHeadDim + fullVHeadDim);
-      const slidingElements = retainedSlidingTokens * slidingLayers * slidingKvHeads * (slidingHeadDim + slidingVHeadDim);
-      const elementsPerSequence = fullElements + slidingElements;
+      // Sparse-attention indexer side cache (optional): a single key-only head whose entries
+      // are compressed once per index block, so it grows with ceil(tokens / index_block_size)
+      // instead of with the token count.  Models without index_head_dim keep the plain
+      // full/sliding layout and never emit an indexer group.
+      const indexerHeadDim = optionalField(model, "index_head_dim", 0);
+      const indexerBlockSize = Math.max(1, optionalField(model, "index_block_size", 1));
+      const indexerKeyHeads = Math.max(1, optionalField(model, "index_num_key_heads", 1));
+      const indexerMainLayers = optionalField(model, "indexer_full_layers", fullLayers);
+      // Draft/MTP layers keep their own layer mix.  Models whose draft layers are
+      // sliding-window (step-5's three next-N layers) must declare it; otherwise the draft
+      // stack is counted as full-attention KV, which overestimates the cache.
+      const draftLayers = includeDraftKvCache ? draftLayerCount(model) : 0;
+      const draftSlidingLayers = Math.min(
+        draftLayers,
+        Math.max(0, optionalField(model, "draft_sliding_attention_layers", 0)),
+      );
+      const draftFullLayers = Math.min(
+        draftLayers - draftSlidingLayers,
+        Math.max(0, optionalField(model, "draft_full_attention_layers", draftLayers - draftSlidingLayers)),
+      );
+      const draftIndexerLayers = Math.min(
+        draftFullLayers,
+        Math.max(0, optionalField(model, "draft_indexer_layers", draftFullLayers)),
+      );
+      const activeFullLayers = fullLayers + draftFullLayers;
+      const activeSlidingLayers = slidingLayers + draftSlidingLayers;
+      const fullElements = tokens * activeFullLayers * fullKvHeads * (fullHeadDim + fullVHeadDim);
+      const slidingElements = retainedSlidingTokens * activeSlidingLayers * slidingKvHeads * (slidingHeadDim + slidingVHeadDim);
+      const indexerLayers = indexerHeadDim > 0 ? indexerMainLayers + draftIndexerLayers : 0;
+      const indexerBlocks = indexerHeadDim > 0 ? Math.ceil(tokens / indexerBlockSize) : 0;
+      const indexerElements = indexerHeadDim > 0
+        ? indexerBlocks * indexerLayers * indexerKeyHeads * indexerHeadDim
+        : 0;
+      const elementsPerSequence = fullElements + slidingElements + indexerElements;
+      const hasIndexer = indexerElements > 0;
+      const baseFormulaLabel = FORMULA_LABELS[formula];
+      const baseFormulaText =
+        "full_kv_bytes = tokens * sequences * full_layers * full_kv_heads * (full_head_dim + full_v_head_dim) * precision_bytes\nsliding_kv_bytes = min(tokens, sliding_window) * sequences * sliding_layers * sliding_kv_heads * (sliding_head_dim + sliding_v_head_dim) * precision_bytes\ntotal_bytes = full_kv_bytes + sliding_kv_bytes";
+      const indexerFormulaText =
+        "indexer_bytes = ceil(tokens / index_block_size) * sequences * indexer_layers * index_num_key_heads * index_head_dim * indexer_precision_bytes\ntotal_bytes = full_kv_bytes + sliding_kv_bytes + indexer_bytes";
+      const formulaRows = [
+        {
+          name: "full_kv_bytes",
+          expression: "tokens x sequences x full_layers x full_kv_heads x (full_head_dim + full_v_head_dim) x precision_bytes",
+          description: "Full-attention layers retain ordinary KV for all cached tokens.",
+        },
+        {
+          name: "sliding_kv_bytes",
+          expression: "min(tokens, sliding_window) x sequences x sliding_layers x sliding_kv_heads x (sliding_head_dim + sliding_v_head_dim) x precision_bytes",
+          description: "Sliding-attention layers retain only the local window for each sequence.",
+        },
+      ];
+      if (hasIndexer) {
+        formulaRows.push({
+          name: "indexer_bytes",
+          expression: "ceil(tokens / index_block_size) x sequences x indexer_layers x index_num_key_heads x index_head_dim x indexer_precision_bytes",
+          description: "Sparse-attention indexer keeps one compressed key-only summary per index block, so it is much smaller than the KV cache it scores.",
+        });
+      }
+      formulaRows.push({
+        name: "total_bytes",
+        expression: hasIndexer ? "full_kv_bytes + sliding_kv_bytes + indexer_bytes" : "full_kv_bytes + sliding_kv_bytes",
+        description: hasIndexer
+          ? "Combined reusable full-attention KV, sliding-window KV and indexer payload."
+          : "Combined reusable full-attention and sliding-window KV payload.",
+      });
+      const components = [
+        ["Main layers", layers],
+        ["Stored layers", optionalField(model, "stored_layers", fullLayers + slidingLayers), "KV-producing layers counted after model-specific KV sharing, when configured."],
+        ["Full-attention layers", fullLayers, "Layers whose KV grows with total cached tokens."],
+        ["Sliding-attention layers", slidingLayers, "Layers whose KV is capped by the sliding window."],
+        ["Retained sliding tokens", retainedSlidingTokens, "min(tokens, sliding_window) for sliding-attention layers."],
+        ["Full K+V dims", fullHeadDim + fullVHeadDim, "Key plus value dimensions per full-attention KV head."],
+        ["Sliding K+V dims", slidingHeadDim + slidingVHeadDim, "Key plus value dimensions per sliding-window KV head."],
+        ["Full-attention elements", fullElements, "Full-attention scalar KV elements before applying precision bytes."],
+        ["Sliding-window elements", slidingElements, "Sliding-window scalar KV elements before applying precision bytes."],
+      ];
+      if (hasIndexer) {
+        components.push(
+          ["Indexer layers", indexerLayers, "Attention layers that also store an indexer summary; equals the sparse-attention layer count."],
+          ["Indexer block size", indexerBlockSize, "Tokens compressed into one indexer summary. This is a capacity divider, not a sliding-window cap."],
+          ["Indexer blocks per sequence", indexerBlocks, "ceil(tokens / index_block_size) summaries retained per indexer layer."],
+          ["Indexer elements", indexerElements, "Indexer scalar elements before applying the indexer precision."],
+        );
+      }
+      if (draftLayers > 0) {
+        components.push(
+          ["Draft layers included", draftLayers, "Extra MTP/next-N layers counted when draft KV is enabled."],
+          ["Draft sliding-attention layers", draftSlidingLayers, "Draft layers that keep a sliding-window cache instead of full-attention KV."],
+          ["Draft full-attention layers", draftFullLayers, "Draft layers whose KV grows with total cached tokens."],
+          ["Draft indexer layers", draftIndexerLayers, "Draft layers that also store an indexer summary."],
+        );
+      }
+      components.push(
+        ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "sliding_attention_layers", "num_key_value_heads", "num_global_key_value_heads", "head_dim", "global_head_dim", "v_head_dim", "global_v_head_dim", "swa_num_key_value_heads", "swa_head_dim", "swa_v_head_dim", "sliding_window", "index_head_dim", "index_block_size", "index_num_key_heads", "indexer_full_layers", "num_nextn_predict_layers", "draft_sliding_attention_layers", "draft_full_attention_layers", "draft_indexer_layers"])],
+      );
+      const byteGroups = [
+        { role: "kv", label: "Full-attention KV cache", heads: fullKvHeads, elements: fullElements },
+        { role: "kv", label: "Sliding-window KV cache", heads: slidingKvHeads, elements: slidingElements },
+      ];
+      if (hasIndexer) {
+        byteGroups.push({ role: "indexer", label: "Indexer cache", heads: indexerKeyHeads, elements: indexerElements });
+      }
       return {
         elementsPerSequence,
         elementsPerToken: elementsPerSequence / tokens,
-        formulaLabel: FORMULA_LABELS[formula],
-        formulaText:
-          "full_kv_bytes = tokens * sequences * full_layers * full_kv_heads * (full_head_dim + full_v_head_dim) * precision_bytes\nsliding_kv_bytes = min(tokens, sliding_window) * sequences * sliding_layers * sliding_kv_heads * (sliding_head_dim + sliding_v_head_dim) * precision_bytes\ntotal_bytes = full_kv_bytes + sliding_kv_bytes",
-        formulaRows: [
-          {
-            name: "full_kv_bytes",
-            expression: "tokens x sequences x full_layers x full_kv_heads x (full_head_dim + full_v_head_dim) x precision_bytes",
-            description: "Full-attention layers retain ordinary KV for all cached tokens.",
-          },
-          {
-            name: "sliding_kv_bytes",
-            expression: "min(tokens, sliding_window) x sequences x sliding_layers x sliding_kv_heads x (sliding_head_dim + sliding_v_head_dim) x precision_bytes",
-            description: "Sliding-attention layers retain only the local window for each sequence.",
-          },
-          {
-            name: "total_bytes",
-            expression: "full_kv_bytes + sliding_kv_bytes",
-            description: "Combined reusable full-attention and sliding-window KV payload.",
-          },
-        ],
-        note: "Production estimate counts text-generation KV payload only. Vision/audio encoder activations and allocator memory are excluded.",
-        byteGroups: [
-          { role: "kv", label: "Full-attention KV cache", heads: fullKvHeads, elements: fullElements },
-          { role: "kv", label: "Sliding-window KV cache", heads: slidingKvHeads, elements: slidingElements },
-        ],
-        components: [
-          ["Main layers", layers],
-          ["Stored layers", optionalField(model, "stored_layers", fullLayers + slidingLayers), "KV-producing layers counted after model-specific KV sharing, when configured."],
-          ["Full-attention layers", fullLayers, "Layers whose KV grows with total cached tokens."],
-          ["Sliding-attention layers", slidingLayers, "Layers whose KV is capped by the sliding window."],
-          ["Retained sliding tokens", retainedSlidingTokens, "min(tokens, sliding_window) for sliding-attention layers."],
-          ["Full K+V dims", fullHeadDim + fullVHeadDim, "Key plus value dimensions per full-attention KV head."],
-          ["Sliding K+V dims", slidingHeadDim + slidingVHeadDim, "Key plus value dimensions per sliding-window KV head."],
-          ["Full-attention elements", fullElements, "Full-attention scalar KV elements before applying precision bytes."],
-          ["Sliding-window elements", slidingElements, "Sliding-window scalar KV elements before applying precision bytes."],
-          ["Model fields", fieldList(model, ["num_hidden_layers", "full_attention_layers", "sliding_attention_layers", "num_key_value_heads", "num_global_key_value_heads", "head_dim", "global_head_dim", "v_head_dim", "global_v_head_dim", "swa_num_key_value_heads", "swa_head_dim", "swa_v_head_dim", "sliding_window"])],
-        ],
+        formulaLabel: hasIndexer ? `${baseFormulaLabel} + indexer` : baseFormulaLabel,
+        formulaText: hasIndexer ? `${baseFormulaText}\n${indexerFormulaText}` : baseFormulaText,
+        formulaRows,
+        note: hasIndexer
+          ? "Production estimate counts text-generation KV payload only. The indexer stores one compressed key-only summary per block and uses its own precision. Vision/audio encoder activations and allocator memory are excluded."
+          : "Production estimate counts text-generation KV payload only. Vision/audio encoder activations and allocator memory are excluded.",
+        byteGroups,
+        components,
       };
     }
 
@@ -588,6 +659,52 @@
           ["Per-token elements", layers * 2 * kvHeads * headDim, "Scalar KV elements per retained token before multiplying by precision bytes."],
           ["Model fields", fieldList(model, ["num_hidden_layers", "num_key_value_heads", "head_dim", "sliding_window"])],
         ],
+      };
+    }
+
+    // DeepSeek V4.1 的 KV 由 vllm-ascend 的"物理页"模型决定：每个 block 的页大小
+    // 已经把 MLA 压缩 KV、indexer K、SWA 窗口、compressor 状态合并为 max() 后的单页。
+    // 数值取自 vllm-ascend 的 production 布局测试
+    // (tests/ut/models/test_deepseek_v41_cache.py::test_production_layout_matches_design)：
+    // block_size=128 时 4 个 kv_source 槽的页为 [131072, 131072, 131072, 147712]，合计 540928 字节
+    // （该测试用 candidate_topk_blocks=16）；线上配置 candidate_topk_blocks=2048，candidate 缓冲多出
+    // (2048-16)×8×2 ≈ 32512 字节，故取 573440 字节/block，对应 vllm-ascend 文档的
+    // "1M token ≈ 4.18 GiB/device"。
+    if (formula === "dsv41_paged") {
+      const blockTokens = getField(model, "block_tokens");
+      const pageBytes = getField(model, "page_bytes_per_block");
+      const blocksPerSequence = Math.ceil(tokens / blockTokens);
+      // 页大小是按 BF16（2 字节/元素）测得的；换算成元素数后由精度档位乘回去，
+      // 这样 int8 / int4 / mxfp8 / mxfp4 才能得到不同的字节数。
+      const elementsPerSequence = (blocksPerSequence * pageBytes) / 2;
+      return {
+        components: [],
+        elementsPerSequence,
+        elementsPerToken: pageBytes / blockTokens / 2,
+        formulaLabel: FORMULA_LABELS[formula],
+        formulaRows: [
+          {
+            name: "blocks_per_sequence",
+            expression: "ceil(tokens / block_tokens)",
+            description: "每个序列占用的物理页数量，block_tokens 为页覆盖的 token 数（V4.1 为 128）。",
+          },
+          {
+            name: "elements_per_sequence",
+            expression: "blocks_per_sequence x page_bytes_per_block / 2",
+            description: "以 BF16 元素为单位；实际字节数由 KV precision 决定（INT8/MXFP8 减半，INT4/MXFP4 约四分之一）。",
+          },
+          {
+            name: "total_bytes",
+            expression: "elements_per_sequence x sequences x precision_bytes",
+            description: "物理页在 TP 间复制，单卡字节数等于该值。",
+          },
+        ],
+        formulaText:
+          "blocks_per_sequence = ceil(tokens / block_tokens)\nelements_per_sequence = blocks_per_sequence x page_bytes_per_block / 2\ntotal_bytes = elements_per_sequence x sequences x precision_bytes",
+        note:
+          "页模型取自 vllm-ascend：block_size=128 时 4 个 kv_source 槽页大小为 [131072, 131072, 131072, 147712]（测试值 540928），"
+          + "线上 candidate_topk_blocks=2048 再多出约 32512 字节，故取 573440 字节/页；BF16 下 1M token 约 4.17 GiB/device，"
+          + "与 vllm-ascend DeepSeek-V4.1-Flash 部署文档的 4.18 GiB 一致。",
       };
     }
 
@@ -891,7 +1008,17 @@
     if (input.speculativeModel) {
       elementPlan = mergeSpeculativeDraft(elementPlan, input.speculativeModel, tokens);
     }
-    const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, cachePrecision).map((group) => {
+    // dsv41_paged 直接按物理页给出字节数（页内已含各段 dtype），不再乘精度字节。
+    const effectiveCachePrecision = elementPlan.bytesAlready
+      ? {
+          label: precision.label,
+          bytesPerElement: 1,
+          kvBytesPerElement: 1,
+          indexerBytesPerElement: 1,
+        }
+      : cachePrecision;
+
+    const cacheGroupsPerSequence = calculateCacheGroups(elementPlan, effectiveCachePrecision).map((group) => {
       const distribution = distributeHeads(group.heads, tensorParallel);
       return {
         ...group,

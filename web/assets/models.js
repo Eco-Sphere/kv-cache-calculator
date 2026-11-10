@@ -24,6 +24,16 @@
       "label": "FP8 / INT8"
     },
     {
+      "bytes_per_element": 1.03125,
+      "id": "mxfp8",
+      "label": "MXFP8"
+    },
+    {
+      "bytes_per_element": 0.53125,
+      "id": "mxfp4",
+      "label": "MXFP4"
+    },
+    {
       "bytes_per_element": 0.5,
       "id": "fp4_int4",
       "label": "FP4 / INT4"
@@ -119,6 +129,50 @@
       "max_position_embeddings": 1048576,
       "source_retrieved_at": "2026-05-20",
       "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "DeepSeek",
+      "fields": {
+        "block_tokens": 128,
+        "compress_ratios": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        "index_head_dim": 128,
+        "index_n_heads": 32,
+        "index_source_layers": 8,
+        "kv_source_layers": 4,
+        "num_hidden_layers": 40,
+        "num_key_value_heads": 1,
+        "page_bytes_per_block": 573440,
+        "sliding_window": 128
+      },
+      "formula": "dsv41_paged",
+      "id": "deepseek-v4.1-flash",
+      "label": "DeepSeek V4.1 Flash",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-10",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "DeepSeek",
+      "fields": {
+        "block_tokens": 128,
+        "compress_ratios": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        "index_head_dim": 128,
+        "index_n_heads": 32,
+        "index_source_layers": 8,
+        "kv_source_layers": 4,
+        "num_hidden_layers": 40,
+        "num_key_value_heads": 1,
+        "page_bytes_per_block": 573440,
+        "sliding_window": 128
+      },
+      "formula": "dsv41_paged",
+      "id": "deepseek-v4.1-flash-1017",
+      "label": "DeepSeek V4.1 Flash 1017",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-10",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017/raw/main/config.json"
     },
     {
       "default_tokens": 1024,
@@ -324,6 +378,36 @@
       "max_position_embeddings": 1048576,
       "source_retrieved_at": "2026-06-17",
       "source_url": "https://huggingface.co/zai-org/GLM-5.2/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
+      "family": "GLM",
+      "fields": {
+        "draft_indexer_layers": 1,
+        "index_head_dim": 128,
+        "index_num_key_heads": 1,
+        "index_n_heads": 32,
+        "index_share_for_mtp_iteration": true,
+        "index_skip_topk_offset": 3,
+        "index_topk": 2048,
+        "index_topk_freq": 4,
+        "indexer_full_layers": 21,
+        "indexer_shared_layers": 57,
+        "kv_lora_rank": 512,
+        "num_hidden_layers": 78,
+        "num_key_value_heads": 64,
+        "num_nextn_predict_layers": 1,
+        "qk_head_dim": 256,
+        "qk_nope_head_dim": 192,
+        "qk_rope_head_dim": 64,
+        "v_head_dim": 256
+      },
+      "formula": "dsa_mla",
+      "id": "glm-5.3",
+      "label": "GLM-5.3",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-09",
+      "source_url": "https://huggingface.co/zai-org/GLM-5.3/raw/main/config.json"
     },
     {
       "default_tokens": 1024,
@@ -1245,6 +1329,34 @@
     },
     {
       "default_tokens": 1024,
+      "family": "MiniMax",
+      "fields": {
+        "disable_draft_kv_cache": true,
+        "full_attention_layers": 0,
+        "head_dim": 128,
+        "index_block_size": 128,
+        "index_head_dim": 128,
+        "index_local_blocks": 1,
+        "index_num_key_heads": 1,
+        "index_n_heads": 4,
+        "index_topk_blocks": 16,
+        "indexer_fixed_precision_id": "bf16_fp16",
+        "num_attention_heads": 64,
+        "num_hidden_layers": 60,
+        "num_key_value_heads": 4,
+        "num_nextn_predict_layers": 0,
+        "sparse_attention": true,
+        "sparse_attention_layers": 60
+      },
+      "formula": "minimax_msa",
+      "id": "minimax-m3.1-flash",
+      "label": "MiniMax M3.1 Flash",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-09",
+      "source_url": "https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash/raw/main/config.json"
+    },
+    {
+      "default_tokens": 1024,
       "family": "Step",
       "fields": {
         "full_attention_layers": 12,
@@ -1280,7 +1392,38 @@
       "max_position_embeddings": 262144,
       "source_retrieved_at": "2026-09-02",
       "source_url": "https://huggingface.co/stepfun-ai/Step-3.7-Flash/raw/main/config.json"
-    }
+    },
+
+    {
+      "default_tokens": 1024,
+      "family": "Step",
+      "fields": {
+        "draft_full_attention_layers": 0,
+        "draft_indexer_layers": 0,
+        "draft_sliding_attention_layers": 3,
+        "full_attention_layers": 23,
+        "head_dim": 192,
+        "index_block_size": 8,
+        "index_head_dim": 256,
+        "index_n_heads": 16,
+        "index_num_key_heads": 1,
+        "index_topk": 512,
+        "indexer_fixed_precision_id": "fp8_int8",
+        "indexer_full_layers": 23,
+        "num_attention_heads": 64,
+        "num_hidden_layers": 92,
+        "num_key_value_heads": 4,
+        "num_nextn_predict_layers": 3,
+        "sliding_attention_layers": 69,
+        "sliding_window": 512
+      },
+      "formula": "mixed_full_sliding_gqa",
+      "id": "step-5-preview",
+      "label": "Step 5 Preview",
+      "max_position_embeddings": 1048576,
+      "source_retrieved_at": "2026-11-05",
+      "source_url": "https://huggingface.co/stepfun-ai/Step-5-Preview/raw/main/config.json"
+    },
   ],
   "precision_options": [
     {
@@ -1297,6 +1440,16 @@
       "bytes_per_element": 0.5,
       "id": "fp4_int4",
       "label": "FP4 / INT4"
+    },
+    {
+      "bytes_per_element": 1.03125,
+      "id": "mxfp8",
+      "label": "MXFP8"
+    },
+    {
+      "bytes_per_element": 0.53125,
+      "id": "mxfp4",
+      "label": "MXFP4"
     }
   ],
   "speculative_models": [

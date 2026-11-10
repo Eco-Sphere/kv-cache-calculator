@@ -411,33 +411,6 @@
     },
     {
       "default_tokens": 1024,
-      "family": "GLM",
-      "fields": {
-        "draft_indexer_layers": 1,
-        "index_head_dim": 128,
-        "index_num_key_heads": 1,
-        "index_n_heads": 32,
-        "index_topk": 2048,
-        "indexer_full_layers": 45,
-        "indexer_shared_layers": 0,
-        "kv_lora_rank": 512,
-        "num_hidden_layers": 45,
-        "num_key_value_heads": 64,
-        "num_nextn_predict_layers": 1,
-        "qk_head_dim": 256,
-        "qk_nope_head_dim": 256,
-        "qk_rope_head_dim": 0,
-        "v_head_dim": 256
-      },
-      "formula": "dsa_mla",
-      "id": "glm-5.3-flash",
-      "label": "GLM-5.3-Flash",
-      "max_position_embeddings": 1048576,
-      "source_retrieved_at": "2026-11-09",
-      "source_url": "https://huggingface.co/zai-org/GLM-5.3-Flash/raw/main/config.json"
-    },
-    {
-      "default_tokens": 1024,
       "family": "Kimi",
       "fields": {
         "kv_lora_rank": 512,

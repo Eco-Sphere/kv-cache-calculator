@@ -25,7 +25,7 @@ function inputFor(item, overrides = {}) {
 }
 
 test("includes all catalog models, ten visible families, and eight formulas", () => {
-  assert.equal(data.models.length, 61);
+  assert.equal(data.models.length, 60);
   assert.deepEqual(app.families(data.models), [
     "Cohere", "DeepSeek", "Gemma", "GLM", "Kimi", "Llama", "MiMo", "MiniMax", "Qwen", "Step",
   ]);
@@ -146,7 +146,12 @@ test("GLM-5.3 keeps 21 indexer layers out of 78 and prices MLA KV", () => {
   assert.equal(result.totalBytes, 92544000000);
 });
 
-test("GLM-5.3-Flash puts an indexer on all 45 layers", () => {
+test("GLM-5.3-Flash is a linear+sparse hybrid and stays out of the catalog", () => {
+  // 官方 config: layer_types = 34 linear_attention + 11 deepseek_sparse_attention，
+  // dsa_mla 会把 45 层全按 MLA 计，故暂不收录（TODO-13），避免高估。
+  assert.equal(data.models.find((item) => item.id === "glm-5.3-flash"), undefined);
+});
+test.skip("GLM-5.3-Flash puts an indexer on all 45 layers", () => {
   const item = model("glm-5.3-flash");
   assert.equal(item.fields.num_hidden_layers, 45);
   assert.equal(item.fields.indexer_full_layers, 45);

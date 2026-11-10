@@ -136,6 +136,8 @@
       "fields": {
         "block_tokens": 128,
         "compress_ratios": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        "index_head_dim": 128,
+        "index_n_heads": 32,
         "index_source_layers": 8,
         "kv_source_layers": 4,
         "num_hidden_layers": 40,
@@ -156,6 +158,8 @@
       "fields": {
         "block_tokens": 128,
         "compress_ratios": [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        "index_head_dim": 128,
+        "index_n_heads": 32,
         "index_source_layers": 8,
         "kv_source_layers": 4,
         "num_hidden_layers": 40,

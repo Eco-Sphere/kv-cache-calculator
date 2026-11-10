@@ -24,6 +24,16 @@
       "label": "FP8 / INT8"
     },
     {
+      "bytes_per_element": 1.03125,
+      "id": "mxfp8",
+      "label": "MXFP8"
+    },
+    {
+      "bytes_per_element": 0.53125,
+      "id": "mxfp4",
+      "label": "MXFP4"
+    },
+    {
       "bytes_per_element": 0.5,
       "id": "fp4_int4",
       "label": "FP4 / INT4"
@@ -1453,6 +1463,16 @@
       "bytes_per_element": 0.5,
       "id": "fp4_int4",
       "label": "FP4 / INT4"
+    },
+    {
+      "bytes_per_element": 1.03125,
+      "id": "mxfp8",
+      "label": "MXFP8"
+    },
+    {
+      "bytes_per_element": 0.53125,
+      "id": "mxfp4",
+      "label": "MXFP4"
     }
   ],
   "speculative_models": [

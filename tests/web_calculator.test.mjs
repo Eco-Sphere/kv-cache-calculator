@@ -188,6 +188,22 @@ test("DeepSeek V4.1 Flash prices its KV by the vllm-ascend physical page", () =>
   assert.ok(Math.abs(result.totalBytes / (4.18 * 2 ** 30) - 1) < 0.01);
 });
 
+test("DeepSeek V4.1 Flash page cache scales with the KV precision", () => {
+  const item = model("deepseek-v4.1-flash");
+  const bf16 = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 8, precision: "bf16_fp16" }), data);
+  const int8 = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 8, precision: "fp8_int8" }), data);
+  const int4 = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 8, precision: "fp4_int4" }), data);
+  const mxfp8 = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 8, precision: "mxfp8" }), data);
+  const mxfp4 = app.calculateView(item, inputFor(item, { tokens: 1000000, tensorParallel: 8, precision: "mxfp4" }), data);
+  assert.equal(int8.totalBytes, bf16.totalBytes / 2);
+  assert.equal(int4.totalBytes, bf16.totalBytes / 4);
+  // MXFP 档多出 E8M0 scale（每 32 个元素 1 字节）
+  assert.equal(mxfp8.totalBytes, Math.round(bf16.totalBytes / 2 * 1.03125));
+  // MXFP4 = 0.5 B/元素 + 每 32 个元素 1 B scale = 0.53125 B，即 BF16 的 0.53125/2
+  assert.equal(mxfp4.totalBytes, Math.round(bf16.totalBytes * 0.53125 / 2));
+  assert.ok(mxfp8.totalBytes > int8.totalBytes && mxfp4.totalBytes > int4.totalBytes);
+});
+
 test("DeepSeek V4.1 Flash 1017 shares the page model and is TP-invariant", () => {
   const item = model("deepseek-v4.1-flash-1017");
   const a = app.calculateView(item, inputFor(item, { tokens: 262144, tensorParallel: 1 }), data);

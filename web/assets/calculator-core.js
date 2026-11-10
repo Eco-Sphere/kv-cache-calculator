@@ -674,25 +674,13 @@
       const blockTokens = getField(model, "block_tokens");
       const pageBytes = getField(model, "page_bytes_per_block");
       const blocksPerSequence = Math.ceil(tokens / blockTokens);
-      const bytesPerSequence = blocksPerSequence * pageBytes;
+      // 页大小是按 BF16（2 字节/元素）测得的；换算成元素数后由精度档位乘回去，
+      // 这样 int8 / int4 / mxfp8 / mxfp4 才能得到不同的字节数。
+      const elementsPerSequence = (blocksPerSequence * pageBytes) / 2;
       return {
-        byteGroups: [
-          {
-            role: "cache",
-            heads: 1,
-            label: "KV cache（V4.1 物理页）",
-            bytesPerSequence,
-          },
-        ],
-        components: [
-          {
-            expression: "ceil(tokens / block_tokens) x page_bytes_per_block",
-            bytes: bytesPerSequence,
-            label: "KV cache（V4.1 物理页）",
-          },
-        ],
-        elementsPerSequence: 0,
-        elementsPerToken: 0,
+        components: [],
+        elementsPerSequence,
+        elementsPerToken: pageBytes / blockTokens / 2,
         formulaLabel: FORMULA_LABELS[formula],
         formulaRows: [
           {
@@ -701,21 +689,21 @@
             description: "每个序列占用的物理页数量，block_tokens 为页覆盖的 token 数（V4.1 为 128）。",
           },
           {
-            name: "bytes_per_sequence",
-            expression: "blocks_per_sequence x page_bytes_per_block",
-            description: "单序列 KV 字节数；页大小由 vllm-ascend 的整页缓存决定（压缩 MLA + indexer + SWA + compressor 状态取 max）。",
+            name: "elements_per_sequence",
+            expression: "blocks_per_sequence x page_bytes_per_block / 2",
+            description: "以 BF16 元素为单位；实际字节数由 KV precision 决定（INT8/MXFP8 减半，INT4/MXFP4 约四分之一）。",
           },
           {
             name: "total_bytes",
-            expression: "bytes_per_sequence x sequences",
-            description: "所有并发序列的 KV 总量；物理页在 TP 间复制，因此单卡字节数等于该值。",
+            expression: "elements_per_sequence x sequences x precision_bytes",
+            description: "物理页在 TP 间复制，单卡字节数等于该值。",
           },
         ],
         formulaText:
-          "blocks_per_sequence = ceil(tokens / block_tokens)\nbytes_per_sequence = blocks_per_sequence x page_bytes_per_block\ntotal_bytes = bytes_per_sequence x sequences",
+          "blocks_per_sequence = ceil(tokens / block_tokens)\nelements_per_sequence = blocks_per_sequence x page_bytes_per_block / 2\ntotal_bytes = elements_per_sequence x sequences x precision_bytes",
         note:
           "页模型取自 vllm-ascend：block_size=128 时 4 个 kv_source 槽页大小为 [131072, 131072, 131072, 147712]（测试值 540928），"
-          + "线上 candidate_topk_blocks=2048 再多出约 32512 字节，故取 573440 字节/页；1M token 约 4.17 GiB/device，"
+          + "线上 candidate_topk_blocks=2048 再多出约 32512 字节，故取 573440 字节/页；BF16 下 1M token 约 4.17 GiB/device，"
           + "与 vllm-ascend DeepSeek-V4.1-Flash 部署文档的 4.18 GiB 一致。",
       };
     }
